@@ -2,6 +2,7 @@ import express from "express";
 import { v4 as uuidv4 } from "uuid";
 import { registerTool } from "../tools/index.js";
 import { config } from "../config.js";
+import { syncRouter } from "./sync.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -32,6 +33,9 @@ export function setWebhookCallback(cb: WebhookCallback): void {
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Mount sync API
+app.use("/api/sync", syncRouter);
 
 let server: ReturnType<typeof app.listen> | null = null;
 

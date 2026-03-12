@@ -78,10 +78,13 @@ export const config = {
 
   // ── Webhooks ───────────────────────────────────────────────
   /** Port for the webhook HTTP server */
-  webhookPort: Number(process.env.WEBHOOK_PORT) || 3456,
+  webhookPort: Number(process.env.PORT) || Number(process.env.WEBHOOK_PORT) || 3456,
 
   /** Optional shared secret for webhook authentication */
   webhookSecret: process.env.WEBHOOK_SECRET ?? "",
+
+  /** Secret token to authorize local<->production DB synchronization */
+  syncSecret: process.env.SYNC_SECRET ?? "",
 
   // ── MCP Bridge ─────────────────────────────────────────────
   /** Path to MCP servers config JSON file */

@@ -128,7 +128,19 @@ export function getSystemPrompt(interfaceMode: "gui" | "terminal" = "terminal"):
       "The browser tool is running invisibly in the background.";
   }
 
-  return BASE_PROMPT + modeInstructions + getSkillsPromptSection();
+  let environmentInstructions = "";
+  if (process.env.RAILWAY_ENVIRONMENT_NAME) {
+    environmentInstructions = `
+
+## ☁️ Cloud Environment Alert (CRITICAL)
+**YOU ARE CURRENTLY RUNNING IN THE CLOUD ON RAILWAY**, NOT locally on the user's laptop.
+Many of your tools (e.g. \`open_folder\`, GUI actions, \`run_shell_command\` targeting local files) will FAIL or execute on the remote container, confusing the user.
+If the user asks you to perform local actions, test local code, or open local apps, **YOU MUST REFUSE** and say:
+*"Please run \`npm run dev\` on your laptop. This will sync our memory and hand over the connection so I can control your local machine."*
+Do not attempt local actions while this alert is active.`;
+  }
+
+  return BASE_PROMPT + modeInstructions + environmentInstructions + getSkillsPromptSection();
 }
 
 // Keep backward compatibility
