@@ -8,6 +8,8 @@ import {
 import { getToolDefinitions, executeTool } from "./tools/index.js";
 import { getFullMemoryContext } from "./memory/index.js";
 import { pruneContext } from "./memory/context-pruner.js";
+import { storeEpisode } from "./memory/semantic-memory.js";
+import { autoExtract } from "./memory/auto-extract.js";
 
 // ── Per-chat conversation history ──────────────────────────────
 
@@ -46,8 +48,8 @@ export async function runAgentLoop(
   while (iterations < config.maxAgentIterations) {
     iterations++;
 
-    // Build system prompt with memory context
-    const memoryContext = getFullMemoryContext(chatId);
+    // Build system prompt with memory context (includes semantic search)
+    const memoryContext = await getFullMemoryContext(chatId, userMessage);
     const systemPrompt = getSystemPrompt(interfaceMode) + memoryContext;
 
     // Call LLM via OpenRouter (with retry for transient errors)
@@ -84,7 +86,13 @@ export async function runAgentLoop(
 
     // If model is done (no tool calls), return the text
     if (choice.finish_reason === "stop" || !message.tool_calls || message.tool_calls.length === 0) {
-      return message.content ?? "I processed your request but have no text response.";
+      const finalText = message.content ?? "I processed your request but have no text response.";
+
+      // Fire-and-forget: store episode in semantic memory + auto-extract
+      storeEpisode(chatId, userMessage, finalText).catch(() => {});
+      autoExtract(chatId, userMessage, finalText).catch(() => {});
+
+      return finalText;
     }
 
     // If model wants to use tools, execute them

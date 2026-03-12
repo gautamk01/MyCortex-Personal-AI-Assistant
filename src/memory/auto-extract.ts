@@ -1,0 +1,130 @@
+import { config } from "../config.js";
+import { chat, type ChatCompletionMessageParam } from "../llm.js";
+import { storeFact } from "./sqlite.js";
+import { addEntity, addRelation } from "./knowledge-graph.js";
+
+// ── Types ──────────────────────────────────────────────────────
+
+interface ExtractedData {
+  facts: Array<{ key: string; value: string; category: string }>;
+  entities: Array<{
+    name: string;
+    type: string;
+    properties: Record<string, unknown>;
+  }>;
+  relations: Array<{
+    from: string;
+    to: string;
+    relation: string;
+  }>;
+}
+
+// ── Extraction Prompt ──────────────────────────────────────────
+
+const EXTRACTION_PROMPT = `You are a memory extraction engine. Analyze the conversation below and extract structured information.
+
+Return a JSON object with these fields:
+- "facts": Array of {key, value, category} — personal facts, preferences, goals, or important statements the user shared.
+  - key: short snake_case identifier (e.g. "favorite_language", "current_project")
+  - value: the actual value
+  - category: one of "personal", "preference", "work", "project", "goal", "general"
+- "entities": Array of {name, type, properties} — people, places, projects, tools, concepts mentioned.
+  - type: one of "person", "place", "project", "tool", "concept", "organization", "thing"
+- "relations": Array of {from, to, relation} — connections between entities.
+  - relation: descriptive verb like "works_on", "uses", "knows", "prefers", "lives_in"
+
+Rules:
+- Only extract NEW, meaningful information. Skip greetings, filler, and obvious context.
+- If nothing meaningful is found, return empty arrays.
+- Keep values concise but complete.
+- Do NOT invent information not present in the conversation.
+
+Respond with ONLY valid JSON, no other text.`;
+
+// ── Auto-Extract Function ──────────────────────────────────────
+
+/**
+ * Analyze a conversation exchange and automatically extract facts,
+ * entities, and relations into the SQLite knowledge graph.
+ *
+ * Runs as a fire-and-forget background task after each agent loop.
+ */
+export async function autoExtract(
+  chatId: number,
+  userMessage: string,
+  assistantMessage: string
+): Promise<void> {
+  try {
+    const conversationSnippet = `User: ${userMessage}\nAssistant: ${assistantMessage}`;
+
+    const messages: ChatCompletionMessageParam[] = [
+      { role: "user", content: conversationSnippet },
+    ];
+
+    const response = await chat(EXTRACTION_PROMPT, messages, []);
+    const content = response.choices[0]?.message?.content;
+
+    if (!content) return;
+
+    // Parse the JSON response — handle markdown code blocks
+    let jsonStr = content.trim();
+    if (jsonStr.startsWith("```")) {
+      jsonStr = jsonStr.replace(/^```(?:json)?\n?/, "").replace(/\n?```$/, "");
+    }
+
+    let extracted: ExtractedData;
+    try {
+      extracted = JSON.parse(jsonStr);
+    } catch {
+      // LLM returned non-JSON — skip silently
+      return;
+    }
+
+    // Store extracted facts
+    if (extracted.facts && Array.isArray(extracted.facts)) {
+      for (const fact of extracted.facts) {
+        if (fact.key && fact.value) {
+          storeFact(chatId, fact.key, fact.value, fact.category || "general");
+        }
+      }
+    }
+
+    // Store extracted entities
+    if (extracted.entities && Array.isArray(extracted.entities)) {
+      for (const entity of extracted.entities) {
+        if (entity.name) {
+          addEntity(
+            chatId,
+            entity.name,
+            entity.type || "thing",
+            entity.properties || {}
+          );
+        }
+      }
+    }
+
+    // Store extracted relations
+    if (extracted.relations && Array.isArray(extracted.relations)) {
+      for (const rel of extracted.relations) {
+        if (rel.from && rel.to && rel.relation) {
+          addRelation(chatId, rel.from, rel.to, rel.relation);
+        }
+      }
+    }
+
+    const counts = {
+      facts: extracted.facts?.length || 0,
+      entities: extracted.entities?.length || 0,
+      relations: extracted.relations?.length || 0,
+    };
+
+    if (counts.facts + counts.entities + counts.relations > 0) {
+      console.log(
+        `🧠 Auto-extracted: ${counts.facts} facts, ${counts.entities} entities, ${counts.relations} relations`
+      );
+    }
+  } catch (err) {
+    // Non-critical — don't crash the agent loop
+    console.error("⚠️  Auto-extraction failed:", err);
+  }
+}

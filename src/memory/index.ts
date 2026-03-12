@@ -12,6 +12,11 @@ import { getGraphContext, registerGraphTools } from "./knowledge-graph.js";
 import { getNotesContext, registerMarkdownTools } from "./markdown.js";
 import { getMediaContext, registerMultimodalTools } from "./multimodal.js";
 import { registerEvolutionTools } from "./evolution.js";
+import {
+  initSemanticMemory,
+  getSemanticContext,
+  isSemanticMemoryEnabled,
+} from "./semantic-memory.js";
 
 // ── Initialize Memory System ───────────────────────────────────
 
@@ -21,6 +26,9 @@ export async function initMemory(): Promise<void> {
 
   // Initialize SQLite database (creates tables if needed)
   initDatabase();
+
+  // Initialize semantic memory (Mem0 + Pinecone)
+  await initSemanticMemory();
 
   // Register all memory tools
   registerMemoryTools();
@@ -37,8 +45,13 @@ export async function initMemory(): Promise<void> {
 /**
  * Get aggregated memory context from all memory subsystems.
  * This is injected into the system prompt for each LLM call.
+ * @param chatId - The chat/user ID
+ * @param currentQuery - The current user message (used for semantic search)
  */
-export function getFullMemoryContext(chatId: number): string {
+export async function getFullMemoryContext(
+  chatId: number,
+  currentQuery?: string
+): Promise<string> {
   const parts: string[] = [];
 
   const factCtx = getMemoryContext(chatId);
@@ -52,6 +65,16 @@ export function getFullMemoryContext(chatId: number): string {
 
   const mediaCtx = getMediaContext(chatId);
   if (mediaCtx) parts.push(mediaCtx);
+
+  // Semantic memory (Mem0 + Pinecone) — only if query provided and enabled
+  if (currentQuery && isSemanticMemoryEnabled()) {
+    try {
+      const semanticCtx = await getSemanticContext(chatId, currentQuery);
+      if (semanticCtx) parts.push(semanticCtx);
+    } catch (err) {
+      console.error("⚠️  Semantic memory context failed:", err);
+    }
+  }
 
   if (parts.length === 0) return "";
   return "\n\n# Your Memory (loaded from persistent storage)\n" + parts.join("\n");

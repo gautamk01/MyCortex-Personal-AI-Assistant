@@ -1,8 +1,8 @@
-# 🧠 Cortex
+# 🧠 MyCortex
 
 **Autonomous Personal AI Agent via Telegram**
 
-Cortex is a self-hosted, agentic AI assistant that runs on your local machine and communicates through Telegram. It features an autonomous tool-calling loop, persistent memory with a knowledge graph, browser automation, task scheduling, voice I/O, and extensible skills — all controlled from a simple chat interface.
+MyCortex is a self-hosted, agentic AI assistant that runs on your local machine and communicates through Telegram. It features an autonomous tool-calling loop, persistent memory with a knowledge graph, browser automation, task scheduling, voice I/O, and extensible skills — all controlled from a simple chat interface.
 
 ---
 

@@ -103,6 +103,22 @@ export const config = {
 
   /** Days before unused memories start decaying */
   memoryDecayDays: Number(process.env.MEMORY_DECAY_DAYS) || 30,
+
+  // ── Semantic Memory (Mem0 + Pinecone) ─────────────────────
+  /** Pinecone API key (free tier) */
+  pineconeApiKey: process.env.PINECONE_API_KEY ?? "",
+
+  /** Pinecone index name */
+  pineconeIndexName: process.env.PINECONE_INDEX_NAME ?? "gravityclaw-memory",
+
+  /** Pinecone host URL */
+  pineconeHost: process.env.PINECONE_HOST ?? "",
+
+  /** Embedding model for semantic memory */
+  embeddingModel: process.env.EMBEDDING_MODEL ?? "text-embedding-3-small",
+
+  /** Embedding dimensions (must match the model) */
+  embeddingDims: Number(process.env.EMBEDDING_DIMS) || 1536,
 } as const;
 
 // Sanity check
