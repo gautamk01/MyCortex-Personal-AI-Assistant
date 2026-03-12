@@ -221,6 +221,79 @@ bot.on("message:text", async (ctx) => {
   }
 });
 
+// ── Handle voice messages ──────────────────────────────────────
+
+bot.on("message:voice", async (ctx) => {
+  const chatId = ctx.chat.id;
+  const mode = getMode(chatId);
+  const interfaceMode = getInterfaceMode(chatId);
+
+  await ctx.replyWithChatAction("typing");
+
+  try {
+    // 1. Download the voice file
+    const file = await ctx.getFile();
+    const downloadUrl = `https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`;
+    
+    // Fetch file contents into a buffer
+    const fetch = await import("undici").then(m => m.fetch);
+    const audioRes = await fetch(downloadUrl);
+    if (!audioRes.ok) throw new Error("Could not download voice message from Telegram.");
+    
+    const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+
+    // 2. Transcribe via Sarvam AI
+    const { speechToText } = await import("./stt.js");
+    const transcript = await speechToText(audioBuffer, "audio/ogg");
+
+    if (!transcript) {
+      await ctx.reply("⚠️ Sorry, I couldn't understand that voice message. The speech-to-text service might be unavailable.");
+      return;
+    }
+
+    // 3. User feedback: Mirror what they said
+    await ctx.reply(`🎙️ *What you said:* "${transcript}"`, { parse_mode: "Markdown" });
+
+    // 4. Run the transcript through the AI Agent loop
+    await ctx.replyWithChatAction(mode === "voice" ? "record_voice" : "typing");
+    const response = await runAgentLoop(chatId, transcript, interfaceMode);
+
+    // 5. Reply (respecting text/voice mode preference)
+    if (mode === "text") {
+      if (response.length <= 4096) {
+        await ctx.reply(response);
+      } else {
+        const chunks = splitMessage(response, 4096);
+        for (const chunk of chunks) {
+          await ctx.reply(chunk);
+        }
+      }
+    } else {
+      try {
+        const cleanText = stripMarkdown(response);
+        const audio = await textToSpeech(cleanText);
+        if (audio) {
+          await ctx.replyWithVoice(new InputFile(audio, "voice.wav"));
+        } else {
+          await ctx.reply(response);
+          await ctx.reply("⚠️ _TTS server is not running. Falling back to text._", {
+            parse_mode: "Markdown",
+          });
+        }
+      } catch (ttsError) {
+        console.warn("⚠️  TTS failed:", ttsError);
+        await ctx.reply(response);
+        await ctx.reply("⚠️ _Voice generation failed. Sent text instead._", {
+          parse_mode: "Markdown",
+        });
+      }
+    }
+  } catch (error) {
+    console.error("❌ STT/Agent error:", error);
+    await ctx.reply("Something went wrong while processing your voice message. Please try again.");
+  }
+});
+
 // ── Helpers ─────────────────────────────────────────────────────
 
 /**

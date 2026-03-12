@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import Database from "better-sqlite3";
 import * as dotenv from "dotenv";
 
 dotenv.config();
@@ -8,6 +9,9 @@ dotenv.config();
 const SYNC_SECRET = process.env.SYNC_SECRET;
 const PROD_URL = process.env.PROD_WEBHOOK_URL; // e.g. https://mycortex-claw-production.up.railway.app
 const DB_PATH = resolve(process.env.MEMORY_DB_PATH ?? "./data/cortex.db");
+
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 5000; // 5 seconds between retries
 
 if (!SYNC_SECRET || !PROD_URL) {
   console.error("❌ SYNC_SECRET or PROD_WEBHOOK_URL missing in .env");
@@ -18,6 +22,48 @@ if (!SYNC_SECRET || !PROD_URL) {
 const syncHeaders = {
   "x-sync-secret": SYNC_SECRET!,
 };
+
+// ── Helper: check if an error is a network issue ───────────────
+function isNetworkError(err: any): boolean {
+  const msg = err?.message ?? "";
+  const causeCode = err?.cause?.code ?? "";
+  return (
+    msg.includes("fetch failed") ||
+    msg.includes("EAI_AGAIN") ||
+    causeCode === "ENOTFOUND" ||
+    causeCode === "EAI_AGAIN" ||
+    causeCode === "ECONNREFUSED" ||
+    causeCode === "ETIMEDOUT"
+  );
+}
+
+// ── Helper: sleep ──────────────────────────────────────────────
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+// ── Helper: retry wrapper ──────────────────────────────────────
+async function withRetry<T>(
+  label: string,
+  fn: () => Promise<T>,
+  retries = MAX_RETRIES,
+): Promise<T> {
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      if (isNetworkError(err) && attempt < retries) {
+        console.log(
+          `   ⏳ Attempt ${attempt}/${retries} failed (network). Retrying in ${RETRY_DELAY_MS / 1000}s...`,
+        );
+        await sleep(RETRY_DELAY_MS);
+      } else {
+        throw err; // either not a network error or last attempt
+      }
+    }
+  }
+  throw new Error(`${label}: all ${retries} attempts failed`);
+}
+
+// ── Sync functions ─────────────────────────────────────────────
 
 async function pauseRemoteBot() {
   console.log("⏸️  Requesting production bot to pause...");
@@ -47,13 +93,25 @@ async function downloadDatabase() {
   if (!res.ok) throw new Error(`Download failed: ${await res.text()}`);
 
   const buffer = Buffer.from(await res.arrayBuffer());
-  
+
   // Ensure data dir exists
   const dir = resolve(DB_PATH, "..");
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-  
+
   writeFileSync(DB_PATH, buffer);
   console.log(`✅ Downloaded database (${buffer.length} bytes) to ${DB_PATH}`);
+
+  // Verify the downloaded file is a valid SQLite database
+  try {
+    const testDb = new Database(DB_PATH, { readonly: true });
+    const tables = testDb.prepare(
+      "SELECT name FROM sqlite_master WHERE type='table'"
+    ).all() as Array<{ name: string }>;
+    testDb.close();
+    console.log(`   📋 Tables found: ${tables.map(t => t.name).join(", ")}`);
+  } catch (err) {
+    console.error("⚠️  Downloaded file may not be a valid SQLite database:", err);
+  }
 }
 
 async function uploadDatabase() {
@@ -63,7 +121,20 @@ async function uploadDatabase() {
     return;
   }
 
+  // !! CRITICAL: Checkpoint the WAL before reading the file.
+  // SQLite WAL mode keeps all writes in cortex.db-wal (not the main .db file).
+  // Without this, we'd upload a near-empty 4KB file and lose all memories.
+  try {
+    const tmpDb = new Database(DB_PATH);
+    tmpDb.pragma("wal_checkpoint(TRUNCATE)");
+    tmpDb.close();
+    console.log("   ✅ WAL checkpoint complete — all data flushed to main DB file.");
+  } catch (err) {
+    console.warn("   ⚠️  WAL checkpoint failed (proceeding anyway):", err);
+  }
+
   const buffer = readFileSync(DB_PATH);
+  console.log(`   📦 DB size after checkpoint: ${(buffer.length / 1024).toFixed(1)} KB`);
   const res = await fetch(`${PROD_URL}/api/sync/db`, {
     method: "POST",
     headers: {
@@ -72,17 +143,18 @@ async function uploadDatabase() {
     },
     body: buffer,
   });
-  
+
   if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
   const json = await res.json();
   console.log(`✅ Uploaded database successfully (${json.bytes} bytes).`);
 }
 
+// ── Main ───────────────────────────────────────────────────────
+
 async function main() {
-  console.log("🔄 Starting Gravity Claw Local Sync Wrapper...");
+  console.log("🔄 Starting Cortex Local Sync Wrapper...");
   let botProcess: import("node:child_process").ChildProcess | null = null;
   let isShuttingDown = false;
-  let isOfflineMode = false;
 
   const shutdown = async () => {
     if (isShuttingDown) return;
@@ -97,25 +169,26 @@ async function main() {
     }
 
     try {
-      if (!isOfflineMode) {
-        await uploadDatabase().catch(e => {
-          if (e.message?.includes("fetch failed") || e.cause?.code === "ENOTFOUND") {
-            console.error("⚠️  Offline Mode: Could not upload database to production.");
-          } else {
-            throw e;
-          }
-        });
-        await resumeRemoteBot().catch(e => {
-          if (e.message?.includes("fetch failed") || e.cause?.code === "ENOTFOUND") {
-            console.error("⚠️  Offline Mode: Could not resume production bot.");
-          } else {
-            throw e;
-          }
-        });
-        console.log("🌅 Sync complete. Production is live.");
-      } else {
-        console.log("🌅 Offline session ended. No sync performed.");
-      }
+      // Try to upload DB and resume production (with retries in case network just came back)
+      await withRetry("Upload DB", uploadDatabase, 2).catch((e) => {
+        if (isNetworkError(e)) {
+          console.error("⚠️  Could not upload database (network unreachable). Local DB is saved at:", DB_PATH);
+        } else {
+          throw e;
+        }
+      });
+
+      await withRetry("Resume bot", resumeRemoteBot, 2).catch((e) => {
+        if (isNetworkError(e)) {
+          console.error("⚠️  Could not resume production bot (network unreachable).");
+          console.error("   💡 Run: curl -X POST -H 'x-sync-secret: <secret>' " + PROD_URL + "/api/sync/resume");
+          console.error("   Or just restart Railway from the dashboard to bring production back.\n");
+        } else {
+          throw e;
+        }
+      });
+
+      console.log("🌅 Shutdown complete.");
       process.exit(0);
     } catch (err) {
       console.error("❌ Fatal error during shutdown sync:", err);
@@ -127,22 +200,27 @@ async function main() {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
 
+  // ── Startup: pause production and download DB (with retries) ──
   try {
-    await pauseRemoteBot();
-    await downloadDatabase();
+    await withRetry("Pause production", pauseRemoteBot);
+    await withRetry("Download DB", downloadDatabase);
   } catch (err: any) {
-    if (err.message?.includes("fetch failed") || err.message?.includes("EAI_AGAIN") || err.cause?.code === "ENOTFOUND") {
-      console.error("\n❌ Network Error: Could not reach the production server.");
-      console.error("   Falling back to OFFLINE MODE (using local database only).\n");
-      isOfflineMode = true;
+    if (isNetworkError(err)) {
+      console.error("\n❌ Could not reach production server after 3 attempts.");
+      console.error("   Your network cannot resolve: " + PROD_URL);
+      console.error("\n   ⚠️  NOT starting local bot to avoid Telegram 409 conflict.");
+      console.error("   (Production may still be running and polling Telegram.)\n");
+      console.error("   💡 Fix options:");
+      console.error("     1. Check your Wi-Fi / internet connection");
+      console.error("     2. Try switching to mobile hotspot");
+      console.error("     3. Restart Railway from the dashboard, then retry\n");
     } else {
       console.error("❌ Startup sync failed:", err);
-      console.log("⚠️  Will attempt to resume remote bot before exiting...");
-      await resumeRemoteBot().catch(() => console.error("   Failed to resume (Network still unreachable)."));
-      process.exit(1);
     }
+    process.exit(1);
   }
 
+  // ── Start local bot ──────────────────────────────────────────
   console.log("🚀 Starting local bot process...");
   botProcess = spawn("npx", ["tsx", "watch", "src/index.ts"], {
     stdio: "inherit",

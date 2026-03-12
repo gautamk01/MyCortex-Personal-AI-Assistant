@@ -86,6 +86,10 @@ export const config = {
   /** Secret token to authorize local<->production DB synchronization */
   syncSecret: process.env.SYNC_SECRET ?? "",
 
+  // ── External APIs ──────────────────────────────────────────
+  /** Sarvam AI API Key */
+  sarvamApiKey: process.env.SARVAM_API_KEY ?? "",
+
   // ── MCP Bridge ─────────────────────────────────────────────
   /** Path to MCP servers config JSON file */
   mcpConfigPath: process.env.MCP_CONFIG_PATH ?? "./mcp-servers.json",

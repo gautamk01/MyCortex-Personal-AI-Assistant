@@ -2,15 +2,57 @@ import { config } from "./config.js";
 import { InputFile } from "grammy";
 
 /**
- * Convert text to speech using the local Kokoro TTS server.
- * Returns a Buffer containing OGG audio (Telegram-friendly format),
- * or null if TTS is unavailable.
+ * Convert text to speech.
+ * In production (Railway), uses Sarvam AI (bulbul:v3).
+ * In local dev, uses the local Kokoro TTS server.
+ * Returns a Buffer containing audio (Ogg or Wav), or null if TTS is unavailable.
  */
 export async function textToSpeech(text: string): Promise<Buffer | null> {
-  if (!config.kokoroUrl) return null;
-
   // Trim text to avoid generating excessively long audio
   const trimmed = text.slice(0, 2000);
+
+  // ── Production: Sarvam AI ───────────────────────────────
+  if (process.env.RAILWAY_ENVIRONMENT_NAME) {
+    if (!config.sarvamApiKey) {
+      console.warn("⚠️  TTS skipped: SARVAM_API_KEY is not set in production.");
+      return null;
+    }
+
+    try {
+      const res = await fetch("https://api.sarvam.ai/text-to-speech", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "api-subscription-key": config.sarvamApiKey
+        },
+        body: JSON.stringify({
+          inputs: [trimmed],
+          target_language_code: "en-IN",
+          speaker: "amelia",
+          pace: 1.0,
+          enable_preprocessing: true,
+          model: "bulbul:v3"
+        })
+      });
+
+      if (!res.ok) {
+        console.warn(`⚠️  Sarvam TTS Failed (${res.status}): ${await res.text()}`);
+        return null;
+      }
+
+      const data = await res.json() as any;
+      if (data.audios && data.audios[0]) {
+        return Buffer.from(data.audios[0], "base64");
+      }
+      return null;
+    } catch (error) {
+      console.warn(`⚠️  Sarvam TTS Exception: ${error instanceof Error ? error.message : error}`);
+      return null;
+    }
+  }
+
+  // ── Local Development: Kokoro TTS ───────────────────────
+  if (!config.kokoroUrl) return null;
 
   try {
     const response = await fetch(`${config.kokoroUrl}/tts`, {
@@ -24,15 +66,14 @@ export async function textToSpeech(text: string): Promise<Buffer | null> {
     });
 
     if (!response.ok) {
-      console.warn(`⚠️  TTS server returned ${response.status}: ${await response.text()}`);
+      console.warn(`⚠️  Local TTS server returned ${response.status}: ${await response.text()}`);
       return null;
     }
 
     const arrayBuffer = await response.arrayBuffer();
     return Buffer.from(arrayBuffer);
   } catch (error) {
-    // TTS is optional — if it's down, just skip voice
-    console.warn(`⚠️  TTS unavailable: ${error instanceof Error ? error.message : error}`);
+    console.warn(`⚠️  Local TTS unavailable: ${error instanceof Error ? error.message : error}`);
     return null;
   }
 }

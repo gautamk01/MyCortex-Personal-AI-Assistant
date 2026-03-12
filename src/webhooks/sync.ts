@@ -1,8 +1,9 @@
 import express, { Router } from "express";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync, unlinkSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { config } from "../config.js";
 import { bot } from "../bot.js";
+import { getDb, initDatabase } from "../memory/sqlite.js";
 
 export const syncRouter = Router();
 
@@ -51,6 +52,14 @@ syncRouter.get("/db", (req, res) => {
   try {
     const dbPath = resolve(config.memoryDbPath);
     console.log(`⬇️  Sync: Downloading DB from ${dbPath}`);
+
+    // Checkpoint WAL to ensure the .db file is fully up-to-date
+    try {
+      getDb().pragma("wal_checkpoint(TRUNCATE)");
+    } catch {
+      // DB might not be initialized yet, proceed anyway
+    }
+
     res.download(dbPath, "cortex.db");
   } catch (err) {
     console.error("❌ Sync DB download error:", err);
@@ -73,8 +82,32 @@ syncRouter.post(
         return;
       }
       
+      // Close the existing DB connection before overwriting the file
+      try {
+        getDb().close();
+      } catch {
+        // DB might not be open, that's fine
+      }
+
+      // !! CRITICAL: Delete stale WAL and SHM files.
+      // If old WAL files exist when a new DB file is written, SQLite treats
+      // the WAL as authoritative and overrides the new DB data — causing the
+      // upload to appear to work but production to still read the old empty DB.
+      for (const ext of ["-wal", "-shm"]) {
+        const sidecar = dbPath + ext;
+        if (existsSync(sidecar)) {
+          unlinkSync(sidecar);
+          console.log(`   🗑️  Deleted stale ${ext} file`);
+        }
+      }
+
       writeFileSync(dbPath, buffer);
       console.log(`✅ Sync: Overwrote DB (${buffer.length} bytes)`);
+
+      // Reopen the DB connection so the app uses the new data
+      initDatabase();
+      console.log("🔄 Sync: Reopened database with uploaded data");
+
       res.json({ success: true, bytes: buffer.length });
     } catch (err) {
       console.error("❌ Sync DB upload error:", err);
