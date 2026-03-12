@@ -9,6 +9,7 @@ import { runAgentLoop } from "./agent.js";
 import { getInterfaceMode } from "./bot.js";
 import { closeAllTerminals } from "./tools/terminal.js";
 import { initMemory } from "./memory/index.js";
+import { startHeartbeat, stopHeartbeat, sendTestCheckIn } from "./heartbeat.js";
 
 // ── Load tools before starting ─────────────────────────────────
 
@@ -48,6 +49,9 @@ setWebhookCallback(async (chatId, message) => {
 // Start webhook HTTP server
 startWebhookServer();
 
+// Heartbeat — daily LeetCode accountability check-in
+startHeartbeat();
+
 // ── Startup ────────────────────────────────────────────────────
 
 console.log("───────────────────────────────────────────");
@@ -65,6 +69,7 @@ async function shutdown() {
   console.log("\n👋 Shutting down…");
   bot.stop();
   stopAllTasks();
+  stopHeartbeat();
   stopWebhookServer();
   await closeMCPBridge();
   // Lazy-imported browser — close if it was used
@@ -83,6 +88,10 @@ process.once("SIGTERM", shutdown);
 
 bot.start({
   onStart: () => {
-    console.log("✅ Cortex is online — waiting for messages…");
+    console.log("✅ Gravity Claw is online — waiting for messages…");
+    // Send a test check-in right now
+    sendTestCheckIn().catch((err) =>
+      console.error("❌ Test check-in failed:", err)
+    );
   },
 });

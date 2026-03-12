@@ -84,7 +84,10 @@ export async function autoExtract(
     if (extracted.facts && Array.isArray(extracted.facts)) {
       for (const fact of extracted.facts) {
         if (fact.key && fact.value) {
-          storeFact(chatId, fact.key, fact.value, fact.category || "general");
+          const key = typeof fact.key === "string" ? fact.key : JSON.stringify(fact.key);
+          const val = typeof fact.value === "string" ? fact.value : JSON.stringify(fact.value);
+          const cat = typeof fact.category === "string" ? fact.category : (fact.category ? JSON.stringify(fact.category) : "general");
+          storeFact(chatId, String(key), String(val), String(cat));
         }
       }
     }
@@ -93,11 +96,13 @@ export async function autoExtract(
     if (extracted.entities && Array.isArray(extracted.entities)) {
       for (const entity of extracted.entities) {
         if (entity.name) {
+          const name = typeof entity.name === "string" ? entity.name : JSON.stringify(entity.name);
+          const type = typeof entity.type === "string" ? entity.type : (entity.type ? JSON.stringify(entity.type) : "thing");
           addEntity(
             chatId,
-            entity.name,
-            entity.type || "thing",
-            entity.properties || {}
+            String(name),
+            String(type),
+            typeof entity.properties === "object" && entity.properties !== null ? entity.properties : {}
           );
         }
       }
@@ -107,7 +112,10 @@ export async function autoExtract(
     if (extracted.relations && Array.isArray(extracted.relations)) {
       for (const rel of extracted.relations) {
         if (rel.from && rel.to && rel.relation) {
-          addRelation(chatId, rel.from, rel.to, rel.relation);
+          const from = typeof rel.from === "string" ? rel.from : JSON.stringify(rel.from);
+          const to = typeof rel.to === "string" ? rel.to : JSON.stringify(rel.to);
+          const relation = typeof rel.relation === "string" ? rel.relation : JSON.stringify(rel.relation);
+          addRelation(chatId, String(from), String(to), String(relation));
         }
       }
     }
