@@ -3,17 +3,9 @@ import axios from "axios";
 import FormData from "form-data";
 
 /**
- * Convert audio to text using Sarvam AI STT in production.
- * If local, returns a mock string since local STT is not configured.
+ * Convert audio to text using Sarvam AI STT mapping for both local and production.
  */
 export async function speechToText(audioBuffer: Buffer, mimeType: string = "audio/ogg"): Promise<string | null> {
-  // Local development fallback
-  if (!process.env.RAILWAY_ENVIRONMENT_NAME) {
-    console.log("🎙️  [Local] STT triggered, but no local STT model is configured.");
-    return "(Local STT fallback: Pretend the user said 'Hello')\n\n*Note: Local STT is not currently configured.*";
-  }
-
-  // Production (Railway) handling using Sarvam AI
   if (!config.sarvamApiKey) {
     console.error("❌ SARVAM_API_KEY is missing. Cannot transcribe audio.");
     return null;
@@ -43,3 +35,4 @@ export async function speechToText(audioBuffer: Buffer, mimeType: string = "audi
     return null;
   }
 }
+
