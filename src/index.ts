@@ -89,9 +89,5 @@ process.once("SIGTERM", shutdown);
 bot.start({
   onStart: () => {
     console.log("✅ Gravity Claw is online — waiting for messages…");
-    // Send a test check-in right now
-    sendTestCheckIn().catch((err) =>
-      console.error("❌ Test check-in failed:", err)
-    );
   },
 });

@@ -82,6 +82,7 @@ async function main() {
   console.log("🔄 Starting Gravity Claw Local Sync Wrapper...");
   let botProcess: import("node:child_process").ChildProcess | null = null;
   let isShuttingDown = false;
+  let isOfflineMode = false;
 
   const shutdown = async () => {
     if (isShuttingDown) return;
@@ -96,9 +97,25 @@ async function main() {
     }
 
     try {
-      await uploadDatabase();
-      await resumeRemoteBot();
-      console.log("🌅 Sync complete. Production is live.");
+      if (!isOfflineMode) {
+        await uploadDatabase().catch(e => {
+          if (e.message?.includes("fetch failed") || e.cause?.code === "ENOTFOUND") {
+            console.error("⚠️  Offline Mode: Could not upload database to production.");
+          } else {
+            throw e;
+          }
+        });
+        await resumeRemoteBot().catch(e => {
+          if (e.message?.includes("fetch failed") || e.cause?.code === "ENOTFOUND") {
+            console.error("⚠️  Offline Mode: Could not resume production bot.");
+          } else {
+            throw e;
+          }
+        });
+        console.log("🌅 Sync complete. Production is live.");
+      } else {
+        console.log("🌅 Offline session ended. No sync performed.");
+      }
       process.exit(0);
     } catch (err) {
       console.error("❌ Fatal error during shutdown sync:", err);
@@ -113,11 +130,17 @@ async function main() {
   try {
     await pauseRemoteBot();
     await downloadDatabase();
-  } catch (err) {
-    console.error("❌ Startup sync failed:", err);
-    console.log("⚠️  Will attempt to resume remote bot before exiting...");
-    await resumeRemoteBot().catch((e) => console.error("   Failed to resume:", e));
-    process.exit(1);
+  } catch (err: any) {
+    if (err.message?.includes("fetch failed") || err.message?.includes("EAI_AGAIN") || err.cause?.code === "ENOTFOUND") {
+      console.error("\n❌ Network Error: Could not reach the production server.");
+      console.error("   Falling back to OFFLINE MODE (using local database only).\n");
+      isOfflineMode = true;
+    } else {
+      console.error("❌ Startup sync failed:", err);
+      console.log("⚠️  Will attempt to resume remote bot before exiting...");
+      await resumeRemoteBot().catch(() => console.error("   Failed to resume (Network still unreachable)."));
+      process.exit(1);
+    }
   }
 
   console.log("🚀 Starting local bot process...");
