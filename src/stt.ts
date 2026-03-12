@@ -1,5 +1,6 @@
 import { config } from "./config.js";
-import { fetch } from "undici"; // GramMY uses undici under the hood in newer Node
+import axios from "axios";
+import FormData from "form-data";
 
 /**
  * Convert audio to text using Sarvam AI STT in production.
@@ -19,28 +20,26 @@ export async function speechToText(audioBuffer: Buffer, mimeType: string = "audi
   }
 
   try {
-    const fileBlob = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });
     const formData = new FormData();
-    formData.append('file', fileBlob, 'voice_message.ogg');
-    formData.append('model', 'saaras:v3');
+    // Pass the buffer directly with explicit filename and mime type
+    formData.append("file", audioBuffer, {
+      filename: "voice_message.ogg",
+      contentType: mimeType,
+    });
+    formData.append("prompt", "");
+    formData.append("model", "saaras:v2.5");
 
-    const res = await fetch("https://api.sarvam.ai/speech-to-text", {
-      method: "POST",
+    const res = await axios.post("https://api.sarvam.ai/speech-to-text-translate", formData, {
       headers: {
-        "api-subscription-key": config.sarvamApiKey
+        "api-subscription-key": config.sarvamApiKey,
+        ...formData.getHeaders(),
       },
-      body: formData as any
     });
 
-    if (!res.ok) {
-      console.error(`⚠️  Sarvam STT Failed (${res.status}): ${await res.text()}`);
-      return null;
-    }
-
-    const data = await res.json() as any;
-    return data.transcript ?? null;
-  } catch (error) {
-    console.error(`⚠️  STT Exception: ${error instanceof Error ? error.message : error}`);
+    return res.data.transcript ?? null;
+  } catch (error: any) {
+    const errMsg = error.response ? JSON.stringify(error.response.data) : error.message;
+    console.error(`⚠️  STT Exception: ${errMsg}`);
     return null;
   }
 }
