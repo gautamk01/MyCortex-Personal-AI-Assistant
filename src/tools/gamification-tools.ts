@@ -1,7 +1,18 @@
 import { registerTool } from "./index.js";
 import { completeDailyPlanItemByTodoistTaskId } from "../daily-plan.js";
 import { getTodayTasks, addTask, completeTask } from "../todoist.js";
-import { logLeetCodeToSheet, getLeetCodeLogs, updateLeetCodeLog, deleteLeetCodeLog } from "../sheets.js";
+import {
+  deleteLeetCodeLog,
+  deleteWorkLog,
+  getLeetCodeLogs,
+  getWorkLogs,
+  logLeetCodeToSheet,
+  logWorkSessionToSheet,
+  summarizeWorkLogs,
+  updateLeetCodeLog,
+  updateWorkLog,
+  type WorkCategory,
+} from "../sheets.js";
 import { getUserStats, addExp } from "../memory/sqlite.js";
 
 // ── Todoist Tools ──────────────────────────────────────────────
@@ -100,6 +111,61 @@ registerTool({
   },
 });
 
+registerTool({
+  name: "log_work_session_to_sheet",
+  description:
+    "Log a general work session to Google Sheets. Productive categories award EXP, entertainment categories deduct EXP, and neutral categories log without changing EXP.",
+  parameters: {
+    type: "object",
+    properties: {
+      workTitle: { type: "string", description: "What you worked on during the session." },
+      category: {
+        type: "string",
+        enum: [
+          "studying",
+          "development",
+          "project",
+          "reading",
+          "research",
+          "fun",
+          "movies",
+          "gaming",
+          "scrolling",
+          "admin",
+          "health",
+          "other",
+        ],
+        description: "Fixed category used for reporting and EXP.",
+      },
+      tag: { type: "string", description: "Subject, project, or subtopic tag like DBMS or Gravity Claw." },
+      timeMinutes: { type: "number", description: "Time spent in minutes." },
+      output: { type: "string", description: "Optional concrete result from the session." },
+      notes: { type: "string", description: "Optional additional notes." },
+    },
+    required: ["workTitle", "category", "tag", "timeMinutes"],
+  },
+  execute: async (input) => {
+    const chatId = input.__chatId as number;
+    const result = await logWorkSessionToSheet(
+      input.workTitle as string,
+      input.category as WorkCategory,
+      input.tag as string,
+      input.timeMinutes as number,
+      (input.output as string) || "",
+      (input.notes as string) || "",
+    );
+
+    if (result.exp !== 0) {
+      addExp(chatId, result.exp, `Work log: ${input.workTitle}`);
+    }
+
+    const expText =
+      result.exp > 0 ? ` +${result.exp} EXP.` : result.exp < 0 ? ` ${result.exp} EXP.` : " 0 EXP.";
+
+    return `🧾 Logged "${input.workTitle}" under ${result.category} for ${input.timeMinutes} minutes.${expText}`;
+  },
+});
+
 // ── Gamification Tools ─────────────────────────────────────────
 
 registerTool({
@@ -165,6 +231,24 @@ registerTool({
 });
 
 registerTool({
+  name: "get_work_logs",
+  description: "Fetches recent daily work logs from Google Sheets.",
+  parameters: {
+    type: "object",
+    properties: {
+      limit: { type: "number", description: "Number of recent work logs to fetch (default 10)." },
+    },
+    required: [],
+  },
+  execute: async (input) => {
+    const limit = (input.limit as number) || 10;
+    const logs = await getWorkLogs(limit);
+    if (logs.length === 0) return "No daily work logs found in the sheet.";
+    return JSON.stringify(logs, null, 2);
+  },
+});
+
+registerTool({
   name: "update_leetcode_log",
   description: "Updates an existing LeetCode log row in Google Sheets.",
   parameters: {
@@ -191,6 +275,52 @@ registerTool({
 });
 
 registerTool({
+  name: "update_work_log",
+  description: "Updates an existing daily work log row in Google Sheets without recalculating EXP.",
+  parameters: {
+    type: "object",
+    properties: {
+      rowNumber: { type: "number", description: "The row number to update (get this from get_work_logs)." },
+      workTitle: { type: "string" },
+      category: {
+        type: "string",
+        enum: [
+          "studying",
+          "development",
+          "project",
+          "reading",
+          "research",
+          "fun",
+          "movies",
+          "gaming",
+          "scrolling",
+          "admin",
+          "health",
+          "other",
+        ],
+      },
+      tag: { type: "string" },
+      timeMinutes: { type: "number" },
+      output: { type: "string" },
+      notes: { type: "string" },
+    },
+    required: ["rowNumber"],
+  },
+  execute: async (input) => {
+    const rowNumber = input.rowNumber as number;
+    await updateWorkLog(rowNumber, {
+      workTitle: input.workTitle as string | undefined,
+      category: input.category as WorkCategory | undefined,
+      tag: input.tag as string | undefined,
+      timeMinutes: input.timeMinutes as number | undefined,
+      output: input.output as string | undefined,
+      notes: input.notes as string | undefined,
+    });
+    return `✅ Successfully updated daily work log row ${rowNumber}.`;
+  },
+});
+
+registerTool({
   name: "delete_leetcode_log",
   description: "Deletes a LeetCode log row in Google Sheets",
   parameters: {
@@ -204,5 +334,54 @@ registerTool({
     const rowNumber = input.rowNumber as number;
     await deleteLeetCodeLog(rowNumber);
     return `🗑️ Successfully deleted row ${rowNumber} from Google Sheets.`;
+  },
+});
+
+registerTool({
+  name: "delete_work_log",
+  description: "Deletes a daily work log row in Google Sheets.",
+  parameters: {
+    type: "object",
+    properties: {
+      rowNumber: { type: "number", description: "The row number to delete (get this from get_work_logs)." },
+    },
+    required: ["rowNumber"],
+  },
+  execute: async (input) => {
+    const rowNumber = input.rowNumber as number;
+    await deleteWorkLog(rowNumber);
+    return `🗑️ Successfully deleted daily work log row ${rowNumber}.`;
+  },
+});
+
+registerTool({
+  name: "summarize_work_logs",
+  description: "Summarize daily work logs by category and tag for a date range. Defaults to today.",
+  parameters: {
+    type: "object",
+    properties: {
+      dateFrom: { type: "string", description: "Optional start date in YYYY-MM-DD format." },
+      dateTo: { type: "string", description: "Optional end date in YYYY-MM-DD format." },
+    },
+    required: [],
+  },
+  execute: async (input) => {
+    const summary = await summarizeWorkLogs(
+      input.dateFrom as string | undefined,
+      input.dateTo as string | undefined,
+    );
+
+    if (summary.logs.length === 0) {
+      return `No work logs found between ${summary.dateFrom} and ${summary.dateTo}.`;
+    }
+
+    return JSON.stringify({
+      dateFrom: summary.dateFrom,
+      dateTo: summary.dateTo,
+      totalMinutes: summary.totalMinutes,
+      totalExp: summary.totalExp,
+      totalsByCategory: summary.totalsByCategory,
+      totalsByTag: summary.totalsByTag,
+    }, null, 2);
   },
 });
