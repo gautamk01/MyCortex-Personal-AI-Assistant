@@ -90,6 +90,16 @@ export const config = {
   /** Sarvam AI API Key */
   sarvamApiKey: process.env.SARVAM_API_KEY ?? "",
 
+  /** Todoist API Token */
+  todoistApiToken: process.env.TODOIST_API_TOKEN ?? "",
+
+  /** Google Sheets ID */
+  googleSheetId: process.env.GOOGLE_SHEET_ID ?? "",
+
+  /** Google Service Account JSON path */
+  googleCredentialsPath: process.env.GOOGLE_CREDENTIALS_PATH ?? resolve("mycontex-238b05fd7b15.json"),
+
+
   // ── MCP Bridge ─────────────────────────────────────────────
   /** Path to MCP servers config JSON file */
   mcpConfigPath: process.env.MCP_CONFIG_PATH ?? "./mcp-servers.json",

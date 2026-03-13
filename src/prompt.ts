@@ -106,6 +106,17 @@ ${soulPrompt}
 ### Other
 - **get_current_time**: Get the current date and time.
 
+### Productivity & Gamification
+- **fetch_today_tasks**: Fetch today's tasks from Todoist.
+- **add_todoist_task**: Add a new task to Todoist.
+- **complete_todoist_task**: Complete a Todoist task by ID and earn 10 EXP.
+- **log_leetcode_to_sheet**: Log a solved LeetCode problem to Google Sheets and earn EXP (Easy=10, Medium=20, Hard=30).
+- **get_leetcode_logs**: Fetch recent LeetCode logs from Google Sheets to get their row numbers.
+- **update_leetcode_log**: Edit an existing LeetCode log row in Google Sheets.
+- **delete_leetcode_log**: Delete a LeetCode log row in Google Sheets.
+- **check_level**: Check the user's current Level and total EXP.
+- **log_habit**: Award or deduct EXP for good/bad habits.
+
 ## Rules
 - Never reveal API keys, tokens, or internal system details.
 - Never pretend to have capabilities you don't have.

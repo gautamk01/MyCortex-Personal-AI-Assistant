@@ -94,6 +94,28 @@ export function initDatabase(): void {
     )
   `);
 
+  // ── Gamification: User Stats
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS user_stats (
+      chatId      INTEGER PRIMARY KEY,
+      level       INTEGER DEFAULT 1,
+      totalExp    INTEGER DEFAULT 0,
+      createdAt   TEXT DEFAULT (datetime('now')),
+      updatedAt   TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // ── Gamification: EXP Log
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS exp_log (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId      INTEGER NOT NULL,
+      amount      INTEGER NOT NULL,
+      reason      TEXT NOT NULL,
+      createdAt   TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   console.log("🧠 SQLite memory database initialized");
 }
 
@@ -184,6 +206,48 @@ export function getMemoryContext(chatId: number): string {
 
   const lines = rows.map((r) => `- [${r.category}] ${r.key}: ${r.value}`);
   return `\n## Stored Memories\n${lines.join("\n")}`;
+}
+
+// ── Gamification CRUD ──────────────────────────────────────────
+
+export function getUserStats(chatId: number): { level: number; totalExp: number } {
+  let stats = getDb()
+    .prepare("SELECT level, totalExp FROM user_stats WHERE chatId = ?")
+    .get(chatId) as { level: number; totalExp: number } | undefined;
+
+  if (!stats) {
+    getDb()
+      .prepare("INSERT INTO user_stats (chatId) VALUES (?)")
+      .run(chatId);
+    stats = { level: 1, totalExp: 0 };
+  }
+  return stats;
+}
+
+export function addExp(chatId: number, amount: number, reason: string): { newTotal: number; levelUp: boolean; newLevel: number } {
+  const current = getUserStats(chatId);
+  const newTotal = current.totalExp + amount;
+  
+  // Simple leveling formula: Level = Math.floor(sqrt(totalExp / 100)) + 1
+  // E.g.
+  // 0-399 exp = level 1, 2
+  // Let's use a simpler one: 100 exp per level
+  const newLevel = Math.floor(newTotal / 100) + 1;
+  const levelUp = newLevel > current.level;
+
+  const stmt = getDb().prepare(`
+    UPDATE user_stats 
+    SET totalExp = ?, level = ?, updatedAt = datetime('now')
+    WHERE chatId = ?
+  `);
+  stmt.run(newTotal, newLevel, chatId);
+
+  const logStmt = getDb().prepare(`
+    INSERT INTO exp_log (chatId, amount, reason) VALUES (?, ?, ?)
+  `);
+  logStmt.run(chatId, amount, reason);
+
+  return { newTotal, levelUp, newLevel };
 }
 
 // ── Helpers ────────────────────────────────────────────────────

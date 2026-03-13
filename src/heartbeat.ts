@@ -2,69 +2,95 @@ import cron from "node-cron";
 import { config } from "./config.js";
 import { bot } from "./bot.js";
 import { chat, type ChatCompletionMessageParam } from "./llm.js";
-import { getMemoryContext } from "./memory/sqlite.js";
+import { getMemoryContext, getUserStats } from "./memory/sqlite.js";
 import { getGraphContext } from "./memory/knowledge-graph.js";
 import { getSemanticContext, isSemanticMemoryEnabled } from "./memory/semantic-memory.js";
 import { getHistory } from "./agent.js";
+import { getTodayTasks } from "./todoist.js";
 
-// ── Heartbeat Check-in Prompt ──────────────────────────────────
+// ── Prompts ────────────────────────────────────────────────────
 
-const CHECKIN_PROMPT = `You are sending a proactive daily check-in message to Gautam about his LeetCode practice.
-
-## Your Task
-Generate a personalized, casual check-in message. You're his accountability partner, not a nagging bot.
+const MORNING_PROMPT = `You are Gautam's personal AI & accountability partner. It is 8:00 AM.
+Your task is to send an energizing morning briefing.
 
 ## What To Include
-1. **Ask about today's practice** — did he solve a problem? Which topic? What was hard?
-2. **Offer to suggest a problem** for tomorrow based on his weak areas or what he hasn't practiced recently.
-3. **Encourage consistency** — remind him small daily progress compounds, but don't be corny about it.
-4. **Reference his memory** — use the stored facts and past conversations below to personalize. Mention specific topics he's been working on, areas he struggles with, or patterns you notice.
+1. **The Stats**: Acknowledge his current Gamification Level and total EXP.
+2. **The Quote**: Generate or share a strong, hard-hitting motivational quote.
+3. **The Plan**: Summarize his Todoist tasks for today.
+4. **The Call to Action**: End with a strong "Are we ready to crush this?" message.
 
 ## Tone
-- Casual, direct, like a friend who actually gives a damn about his progress.
-- If the memory shows he's been consistent, acknowledge it.
-- If it looks like he's been MIA, gently call it out — no guilt trips, just straight talk.
-- Keep it short (3-5 paragraphs max). Don't write an essay.
+- Casual, highly energetic, direct.
+- Keep it concise (no fluff).
 
-## Memory Context (use this to personalize)
+## Memory & Plan Context
 `;
 
-// ── Core Heartbeat Functions ───────────────────────────────────
+const EVENING_PROMPT = `You are Gautam's personal AI & accountability partner. It is 8:00 PM.
+Your task is to provide the "Reality Check" - a breakdown of what happened today.
 
-/**
- * Generate and send a personalized LeetCode check-in message.
- */
-export async function sendCheckIn(chatId: number): Promise<void> {
+## What To Include
+1. **The Reality**: Look at his daily plan (Todoist) vs what is still left. Ask why some tasks weren't done if many are left.
+2. **The Score**: Acknowledge his current Gamification Level and total EXP. Did he do LeetCode? Did he build good habits?
+3. **The Analysis**: Give him real talk. If he crushed it, praise him. If he slacked, call him out respectfully but firmly.
+
+## Tone
+- Objective, direct, analytical, like a friend who won't take excuses.
+- Keep it concise (3-4 paragraphs max).
+
+## Memory & Tasks Context
+`;
+
+// ── Shared Context Builder ─────────────────────────────────────
+
+async function buildContext(chatId: number): Promise<string> {
+  const memCtx = getMemoryContext(chatId);
+  const graphCtx = getGraphContext(chatId);
+  const stats = getUserStats(chatId);
+  
+  let semanticCtx = "";
+  if (isSemanticMemoryEnabled()) {
+    try {
+      semanticCtx = await getSemanticContext(chatId, "tasks productivity gamification levels");
+    } catch { /* non-critical */ }
+  }
+
+  // Fetch today's tasks
+  let todoString = "";
   try {
-    // Gather all memory context for personalization
-    const memCtx = getMemoryContext(chatId);
-    const graphCtx = getGraphContext(chatId);
-    let semanticCtx = "";
-
-    if (isSemanticMemoryEnabled()) {
-      try {
-        semanticCtx = await getSemanticContext(chatId, "LeetCode practice coding problems algorithms data structures");
-      } catch { /* non-critical */ }
+    const tasks = await getTodayTasks();
+    if (tasks.length === 0) {
+      todoString = "Todoist Plan: No tasks scheduled for today.";
+    } else {
+      todoString = "Todoist Plan:\n" + tasks.map((t: any) => `- ${t.content}`).join("\n");
     }
+  } catch (err) {
+    todoString = "Todoist Plan: Could not fetch Todoist tasks.";
+  }
 
-    const memoryBlock = [memCtx, graphCtx, semanticCtx]
-      .filter(Boolean)
-      .join("\n") || "No stored memories yet — this is the first check-in.";
+  const memoryBlock = [memCtx, graphCtx, semanticCtx].filter(Boolean).join("\n");
+  
+  return `\n## Your Gamification Stats\nLevel: ${stats.level}\nTotal EXP: ${stats.totalExp}\n\n${todoString}\n\n${memoryBlock}`;
+}
 
-    const fullPrompt = CHECKIN_PROMPT + memoryBlock;
+// ── Briefings ──────────────────────────────────────────────────
+
+async function sendCheckIn(chatId: number, isMorning: boolean): Promise<void> {
+  try {
+    const contextStr = await buildContext(chatId);
+    const fullPrompt = (isMorning ? MORNING_PROMPT : EVENING_PROMPT) + contextStr;
 
     const messages: ChatCompletionMessageParam[] = [
       {
         role: "user",
-        content: "Send me my daily LeetCode check-in message. Use my memory to make it personal.",
+        content: isMorning ? "Send my morning briefing." : "Send my evening reality check.",
       },
     ];
 
-    // Use a clean prompt WITHOUT tool descriptions — heartbeat should never trigger tools
     const systemPrompt =
-      `You are Gravity Claw, Gautam's personal AI agent and accountability partner.\n` +
-      `You are sending a proactive daily check-in message. Do NOT use any tools or functions.\n` +
-      `Just write a natural, casual message directly.\n\n` +
+      `You are Gravity Claw, Gautam's personal AI agent.\n` +
+      `You are sending a proactive message. Do NOT use any tools or functions.\n` +
+      `Just write a natural, direct message.\n\n` +
       fullPrompt;
 
     const response = await chat(systemPrompt, messages, []);
@@ -75,96 +101,67 @@ export async function sendCheckIn(chatId: number): Promise<void> {
       return;
     }
 
-    // Strip any accidental tool call XML the LLM might emit
     content = content.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
-    // Strip thinking tags too
     content = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
 
     if (!content) return;
 
-    // Send to Telegram (try Markdown first, fall back to plain text)
-    const messageText = `💪 Daily LeetCode Check-In\n\n${content}`;
+    const prefix = isMorning ? "🌅 **Morning Briefing**\n\n" : "🌙 **Evening Reality Check**\n\n";
+    const messageText = prefix + content;
+
     try {
       await bot.api.sendMessage(chatId, messageText, { parse_mode: "Markdown" });
     } catch {
-      // Markdown parsing failed — send as plain text
       await bot.api.sendMessage(chatId, messageText);
     }
 
-    // Push into agent history so the bot contextually remembers sending this message
     const history = getHistory(chatId);
     history.push({ role: "assistant", content: messageText });
 
-    console.log(`💓 Heartbeat check-in sent to chat ${chatId}`);
+    console.log(`💓 ${isMorning ? 'Morning' : 'Evening'} check-in sent to chat ${chatId}`);
   } catch (err) {
-    console.error("❌ Heartbeat check-in failed:", err);
-
-    // Fallback: send a static message so the user still gets reminded
-    try {
-      await bot.api.sendMessage(
-        chatId,
-        "💪 Hey Gautam! Quick daily check —\n\n" +
-          "• Did you solve a LeetCode problem today?\n" +
-          "• Which topic did you practice? (arrays, DP, graphs, etc.)\n" +
-          "• What was the hardest part?\n" +
-          "• Want me to suggest a problem for tomorrow?\n\n" +
-          "Small daily progress compounds. Don't break the streak! 🔥"
-      );
-    } catch (fallbackErr) {
-      console.error("❌ Heartbeat fallback also failed:", fallbackErr);
-    }
+    console.error(`❌ ${isMorning ? 'Morning' : 'Evening'} check-in failed:`, err);
   }
 }
 
 // ── Schedule the Heartbeat ─────────────────────────────────────
 
-let heartbeatTask: cron.ScheduledTask | null = null;
+let morningTask: cron.ScheduledTask | null = null;
+let eveningTask: cron.ScheduledTask | null = null;
 
-/**
- * Start the daily 8 PM IST heartbeat cron job.
- * Cron: "0 20 * * *" in Asia/Kolkata timezone = 8:00 PM IST every day.
- */
 export function startHeartbeat(): void {
-  const chatId = config.allowedUserIds[0]; // Primary user
+  const chatId = config.allowedUserIds[0];
 
   if (!chatId) {
     console.warn("⚠️  No user IDs configured — heartbeat disabled.");
     return;
   }
 
-  // 8 PM IST every day
-  heartbeatTask = cron.schedule(
-    "0 20 * * *",
-    async () => {
-      console.log("💓 Heartbeat firing — daily LeetCode check-in");
-      await sendCheckIn(chatId);
-    },
-    { timezone: "Asia/Kolkata" }
-  );
+  // Morning: 8:00 AM IST
+  morningTask = cron.schedule("0 8 * * *", async () => {
+    console.log("💓 Heartbeat firing — Morning Briefing");
+    await sendCheckIn(chatId, true);
+  }, { timezone: "Asia/Kolkata" });
 
-  console.log("💓 Heartbeat scheduled: daily LeetCode check-in at 8:00 PM IST");
+  // Evening: 8:00 PM IST
+  eveningTask = cron.schedule("0 20 * * *", async () => {
+    console.log("💓 Heartbeat firing — Evening Reality Check");
+    await sendCheckIn(chatId, false);
+  }, { timezone: "Asia/Kolkata" });
+
+  console.log("💓 Heartbeats scheduled: 8:00 AM & 8:00 PM IST");
 }
 
-/**
- * Stop the heartbeat cron job.
- */
 export function stopHeartbeat(): void {
-  if (heartbeatTask) {
-    heartbeatTask.stop();
-    heartbeatTask = null;
-  }
+  if (morningTask) morningTask.stop();
+  if (eveningTask) eveningTask.stop();
+  morningTask = null;
+  eveningTask = null;
 }
 
-/**
- * Send an immediate test check-in (for debugging/verification).
- */
 export async function sendTestCheckIn(): Promise<void> {
   const chatId = config.allowedUserIds[0];
-  if (!chatId) {
-    console.warn("⚠️  No user IDs configured — can't send test check-in.");
-    return;
-  }
-
-  console.log("💓 Sending test heartbeat check-in...");
-  await sendCheckIn(chatId);
+  if (!chatId) return;
+  console.log("💓 Sending test morning briefing...");
+  await sendCheckIn(chatId, true);
 }

@@ -67,4 +67,5 @@ export async function loadTools(): Promise<void> {
   await import("./terminal.js");
   await import("./desktop.js");
   await import("./codex.js");
+  await import("./gamification-tools.js");
 }
