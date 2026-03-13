@@ -12,6 +12,7 @@ import { getGraphContext, registerGraphTools } from "./knowledge-graph.js";
 import { getNotesContext, registerMarkdownTools } from "./markdown.js";
 import { getMediaContext, registerMultimodalTools } from "./multimodal.js";
 import { registerEvolutionTools } from "./evolution.js";
+import { getDailyPlanContext } from "../daily-plan.js";
 import {
   initSemanticMemory,
   getSemanticContext,
@@ -53,6 +54,9 @@ export async function getFullMemoryContext(
   currentQuery?: string
 ): Promise<string> {
   const parts: string[] = [];
+
+  const planCtx = getDailyPlanContext(chatId);
+  if (planCtx) parts.push(planCtx);
 
   const factCtx = getMemoryContext(chatId);
   if (factCtx) parts.push(factCtx);

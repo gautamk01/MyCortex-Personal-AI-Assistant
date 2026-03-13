@@ -10,4 +10,28 @@ It starts the local bot.
 When you hit Ctrl+C in your terminal to stop developing...
 It uploads the new database back to Railway, keeping all the memories you just created.
 It tells the Railway bot to resume polling.
-You can try it out right now! Send a message to the bot on Telegram to confirm it responds from the cloud. Then, go to your terminal and run npm run dev, and watch the local dev process seamlessly download the brain and take over the connection!
+You can try it out right now! Send a message to the bot on Telegram to confirm it responds from the cloud. Then, go to your terminal and run npm run dev, and watch the local dev process seamlessly download the brain and take over the connection
+
+
+• I changed the active Wi‑Fi interface wlo1 to public DNS and
+  retried. It’s working now.
+
+  What I verified:
+
+  - wlo1 is now using 1.1.1.1, 8.8.8.8, 2606:4700:4700::1111,
+    2001:4860:4860::8888
+  - mycortex-claw-production.up.railway.app now resolves to
+    66.33.22.3
+  - HTTPS to that host responds from Railway edge
+  - npm run dev completed the original handoff successfully:
+      - paused production
+      - downloaded the DB
+      - started the local bot
+      - on stop, uploaded the DB and resumed production
+
+  So the issue was your previous DNS path, not the app code.
+
+  One important detail: this resolvectl change is typically
+  temporary and may be lost after reboot or reconnect. If you
+  want, I can make the DNS change persistent through
+  NetworkManager for your Gautam's S23 connection.

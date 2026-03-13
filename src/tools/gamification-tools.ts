@@ -1,4 +1,5 @@
 import { registerTool } from "./index.js";
+import { completeDailyPlanItemByTodoistTaskId } from "../daily-plan.js";
 import { getTodayTasks, addTask, completeTask } from "../todoist.js";
 import { logLeetCodeToSheet, getLeetCodeLogs, updateLeetCodeLog, deleteLeetCodeLog } from "../sheets.js";
 import { getUserStats, addExp } from "../memory/sqlite.js";
@@ -55,6 +56,7 @@ registerTool({
   execute: async (input) => {
     const chatId = input.__chatId as number;
     await completeTask(input.taskId as string);
+    await completeDailyPlanItemByTodoistTaskId(chatId, input.taskId as string);
     const result = addExp(chatId, 10, `Completed Todoist task ${input.taskId}`);
     let msg = `✅ Task completed! +10 EXP (Total: ${result.newTotal}).`;
     if (result.levelUp) msg += ` 🎉 LEVEL UP → Level ${result.newLevel}!`;
@@ -204,4 +206,3 @@ registerTool({
     return `🗑️ Successfully deleted row ${rowNumber} from Google Sheets.`;
   },
 });
-

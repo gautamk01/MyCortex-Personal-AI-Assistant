@@ -116,6 +116,39 @@ export function initDatabase(): void {
     )
   `);
 
+  // ── Daily planning: one plan per day with linked execution items
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_plans (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId      INTEGER NOT NULL,
+      planDate    TEXT NOT NULL,
+      status      TEXT DEFAULT 'active',
+      createdAt   TEXT DEFAULT (datetime('now')),
+      updatedAt   TEXT DEFAULT (datetime('now')),
+      UNIQUE(chatId, planDate)
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_plan_items (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      planId        INTEGER NOT NULL,
+      chatId        INTEGER NOT NULL,
+      title         TEXT NOT NULL,
+      category      TEXT DEFAULT 'other',
+      priority      TEXT DEFAULT 'should',
+      status        TEXT DEFAULT 'planned',
+      timeBlock     TEXT DEFAULT '',
+      todoistTaskId TEXT DEFAULT '',
+      todoistUrl    TEXT DEFAULT '',
+      reflection    TEXT DEFAULT '',
+      sortOrder     INTEGER DEFAULT 0,
+      createdAt     TEXT DEFAULT (datetime('now')),
+      updatedAt     TEXT DEFAULT (datetime('now')),
+      FOREIGN KEY (planId) REFERENCES daily_plans(id) ON DELETE CASCADE
+    )
+  `);
+
   console.log("🧠 SQLite memory database initialized");
 }
 

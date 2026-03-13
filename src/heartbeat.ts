@@ -1,130 +1,121 @@
 import cron from "node-cron";
 import { config } from "./config.js";
 import { bot } from "./bot.js";
-import { chat, type ChatCompletionMessageParam } from "./llm.js";
-import { getMemoryContext, getUserStats } from "./memory/sqlite.js";
-import { getGraphContext } from "./memory/knowledge-graph.js";
-import { getSemanticContext, isSemanticMemoryEnabled } from "./memory/semantic-memory.js";
-import { getHistory } from "./agent.js";
-import { getTodayTasks } from "./todoist.js";
+import {
+  formatDailyPlan,
+  getDailyPlan,
+  getDailyPlanStats,
+  reconcileDailyPlanWithTodoist,
+} from "./daily-plan.js";
+import { getUserStats } from "./memory/sqlite.js";
 
-// ── Prompts ────────────────────────────────────────────────────
-
-const MORNING_PROMPT = `You are Gautam's personal AI & accountability partner. It is 8:00 AM.
-Your task is to send an energizing morning briefing.
-
-## What To Include
-1. **The Stats**: Acknowledge his current Gamification Level and total EXP.
-2. **The Quote**: Generate or share a strong, hard-hitting motivational quote.
-3. **The Plan**: Summarize his Todoist tasks for today.
-4. **The Call to Action**: End with a strong "Are we ready to crush this?" message.
-
-## Tone
-- Casual, highly energetic, direct.
-- Keep it concise (no fluff).
-
-## Memory & Plan Context
-`;
-
-const EVENING_PROMPT = `You are Gautam's personal AI & accountability partner. It is 8:00 PM.
-Your task is to provide the "Reality Check" - a breakdown of what happened today.
-
-## What To Include
-1. **The Reality**: Look at his daily plan (Todoist) vs what is still left. Ask why some tasks weren't done if many are left.
-2. **The Score**: Acknowledge his current Gamification Level and total EXP. Did he do LeetCode? Did he build good habits?
-3. **The Analysis**: Give him real talk. If he crushed it, praise him. If he slacked, call him out respectfully but firmly.
-
-## Tone
-- Objective, direct, analytical, like a friend who won't take excuses.
-- Keep it concise (3-4 paragraphs max).
-
-## Memory & Tasks Context
-`;
-
-// ── Shared Context Builder ─────────────────────────────────────
-
-async function buildContext(chatId: number): Promise<string> {
-  const memCtx = getMemoryContext(chatId);
-  const graphCtx = getGraphContext(chatId);
+function buildMorningMessage(chatId: number): string {
   const stats = getUserStats(chatId);
-  
-  let semanticCtx = "";
-  if (isSemanticMemoryEnabled()) {
-    try {
-      semanticCtx = await getSemanticContext(chatId, "tasks productivity gamification levels");
-    } catch { /* non-critical */ }
+  const plan = getDailyPlan(chatId);
+
+  if (!plan || plan.items.length === 0) {
+    return [
+      "🌅 Morning Plan",
+      "",
+      `Level ${stats.level} | ${stats.totalExp} EXP`,
+      "",
+      "No plan is locked in for today yet.",
+      "Reply with:",
+      "1. your top 3 must-do tasks",
+      "2. any fixed commitments",
+      "3. deadlines, energy limits, or time constraints",
+      "",
+      "I will turn that into a focused day plan and sync it to Todoist.",
+    ].join("\n");
   }
 
-  // Fetch today's tasks
-  let todoString = "";
-  try {
-    const tasks = await getTodayTasks();
-    if (tasks.length === 0) {
-      todoString = "Todoist Plan: No tasks scheduled for today.";
-    } else {
-      todoString = "Todoist Plan:\n" + tasks.map((t: any) => `- ${t.content}`).join("\n");
-    }
-  } catch (err) {
-    todoString = "Todoist Plan: Could not fetch Todoist tasks.";
-  }
+  const musts = plan.items.filter((item) => item.priority === "must").slice(0, 3);
 
-  const memoryBlock = [memCtx, graphCtx, semanticCtx].filter(Boolean).join("\n");
-  
-  return `\n## Your Gamification Stats\nLevel: ${stats.level}\nTotal EXP: ${stats.totalExp}\n\n${todoString}\n\n${memoryBlock}`;
+  return [
+    "🌅 Morning Commitment",
+    "",
+    `Level ${stats.level} | ${stats.totalExp} EXP`,
+    "",
+    "Today's plan is already locked in.",
+    musts.length > 0 ? "Your must-do items:" : "There are no must-do items yet, so tighten the plan if needed.",
+    ...(musts.length > 0 ? musts.map((item) => `- ${item.title}${item.timeBlock ? ` @ ${item.timeBlock}` : ""}`) : []),
+    "",
+    "Start with the hardest must-do first. Do not drift into low-value work.",
+  ].join("\n");
 }
 
-// ── Briefings ──────────────────────────────────────────────────
+async function buildEveningMessage(chatId: number): Promise<string> {
+  const plan = await reconcileDailyPlanWithTodoist(chatId);
+  const stats = getUserStats(chatId);
 
-async function sendCheckIn(chatId: number, isMorning: boolean): Promise<void> {
+  if (!plan || plan.items.length === 0) {
+    return [
+      "🌙 Evening Reality Check",
+      "",
+      `Level ${stats.level} | ${stats.totalExp} EXP`,
+      "",
+      "No daily plan was created today.",
+      "That means there was nothing concrete to execute against.",
+      "Tomorrow morning starts with planning before anything else.",
+    ].join("\n");
+  }
+
+  const summary = getDailyPlanStats(plan);
+  const openMusts = summary.openMusts.filter((item) => item.status !== "skipped");
+
+  let verdict = "Decent effort, but the plan still needs cleaner execution.";
+  if (summary.mustTotal > 0 && summary.mustDone === summary.mustTotal && summary.done === summary.total) {
+    verdict = "Strong day. You matched the plan and closed the loop.";
+  } else if (summary.mustTotal > 0 && summary.mustDone === 0) {
+    verdict = "You missed every must-do item. That is the main failure to explain.";
+  } else if (summary.mustTotal > 0 && summary.mustDone < summary.mustTotal) {
+    verdict = "You left must-do work unfinished. That is the gap that matters most.";
+  }
+
+  return [
+    "🌙 Evening Reality Check",
+    "",
+    `Level ${stats.level} | ${stats.totalExp} EXP`,
+    `Completed: ${summary.done}/${summary.total}`,
+    `Must-dos done: ${summary.mustDone}/${summary.mustTotal}`,
+    `Skipped: ${summary.skipped}`,
+    "",
+    verdict,
+    "",
+    ...(openMusts.length > 0
+      ? [
+          "Still open must-do items:",
+          ...openMusts.map((item) => `- ${item.title}`),
+          "",
+          "Why did these stay open?",
+          "",
+        ]
+      : []),
+    formatDailyPlan(plan),
+  ].join("\n");
+}
+
+async function sendHeartbeatMessage(chatId: number, text: string): Promise<void> {
+  await bot.api.sendMessage(chatId, text);
+}
+
+export async function sendMorningCheckIn(chatId: number): Promise<void> {
   try {
-    const contextStr = await buildContext(chatId);
-    const fullPrompt = (isMorning ? MORNING_PROMPT : EVENING_PROMPT) + contextStr;
-
-    const messages: ChatCompletionMessageParam[] = [
-      {
-        role: "user",
-        content: isMorning ? "Send my morning briefing." : "Send my evening reality check.",
-      },
-    ];
-
-    const systemPrompt =
-      `You are Gravity Claw, Gautam's personal AI agent.\n` +
-      `You are sending a proactive message. Do NOT use any tools or functions.\n` +
-      `Just write a natural, direct message.\n\n` +
-      fullPrompt;
-
-    const response = await chat(systemPrompt, messages, []);
-    let content = response.choices[0]?.message?.content;
-
-    if (!content) {
-      console.error("⚠️  Heartbeat: LLM returned empty response");
-      return;
-    }
-
-    content = content.replace(/<tool_call>[\s\S]*?<\/tool_call>/g, "").trim();
-    content = content.replace(/<think>[\s\S]*?<\/think>/g, "").trim();
-
-    if (!content) return;
-
-    const prefix = isMorning ? "🌅 **Morning Briefing**\n\n" : "🌙 **Evening Reality Check**\n\n";
-    const messageText = prefix + content;
-
-    try {
-      await bot.api.sendMessage(chatId, messageText, { parse_mode: "Markdown" });
-    } catch {
-      await bot.api.sendMessage(chatId, messageText);
-    }
-
-    const history = getHistory(chatId);
-    history.push({ role: "assistant", content: messageText });
-
-    console.log(`💓 ${isMorning ? 'Morning' : 'Evening'} check-in sent to chat ${chatId}`);
+    await sendHeartbeatMessage(chatId, buildMorningMessage(chatId));
+    console.log(`💓 Morning planning prompt sent to chat ${chatId}`);
   } catch (err) {
-    console.error(`❌ ${isMorning ? 'Morning' : 'Evening'} check-in failed:`, err);
+    console.error("❌ Morning heartbeat failed:", err);
   }
 }
 
-// ── Schedule the Heartbeat ─────────────────────────────────────
+export async function sendEveningReview(chatId: number): Promise<void> {
+  try {
+    await sendHeartbeatMessage(chatId, await buildEveningMessage(chatId));
+    console.log(`💓 Evening review sent to chat ${chatId}`);
+  } catch (err) {
+    console.error("❌ Evening heartbeat failed:", err);
+  }
+}
 
 let morningTask: cron.ScheduledTask | null = null;
 let eveningTask: cron.ScheduledTask | null = null;
@@ -137,16 +128,14 @@ export function startHeartbeat(): void {
     return;
   }
 
-  // Morning: 8:00 AM IST
   morningTask = cron.schedule("0 8 * * *", async () => {
-    console.log("💓 Heartbeat firing — Morning Briefing");
-    await sendCheckIn(chatId, true);
+    console.log("💓 Heartbeat firing — Morning Plan");
+    await sendMorningCheckIn(chatId);
   }, { timezone: "Asia/Kolkata" });
 
-  // Evening: 8:00 PM IST
   eveningTask = cron.schedule("0 20 * * *", async () => {
-    console.log("💓 Heartbeat firing — Evening Reality Check");
-    await sendCheckIn(chatId, false);
+    console.log("💓 Heartbeat firing — Evening Review");
+    await sendEveningReview(chatId);
   }, { timezone: "Asia/Kolkata" });
 
   console.log("💓 Heartbeats scheduled: 8:00 AM & 8:00 PM IST");
@@ -162,6 +151,5 @@ export function stopHeartbeat(): void {
 export async function sendTestCheckIn(): Promise<void> {
   const chatId = config.allowedUserIds[0];
   if (!chatId) return;
-  console.log("💓 Sending test morning briefing...");
-  await sendCheckIn(chatId, true);
+  await sendMorningCheckIn(chatId);
 }

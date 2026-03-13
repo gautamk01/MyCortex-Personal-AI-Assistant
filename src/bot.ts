@@ -1,4 +1,5 @@
-import { Bot, InputFile } from "grammy";
+import { Bot, InputFile, type Context } from "grammy";
+import { formatDailyPlan, getDailyPlan } from "./daily-plan.js";
 import { config } from "./config.js";
 import { runAgentLoop, getHistory } from "./agent.js";
 import { textToSpeech } from "./tts.js";
@@ -44,13 +45,16 @@ bot.use(async (ctx, next) => {
 bot.command("start", async (ctx) => {
   await ctx.reply(
     "🧠 *Cortex is online.*\n\n" +
-      "I'm your personal AI assistant with persistent memory.\n\n" +
+      "I'm your personal AI assistant with persistent memory and a daily planning loop.\n\n" +
       "📝 /text — replies in text only _(default)_\n" +
       "🔊 /voice — replies in voice only\n" +
       "🖥️ /gui — use visible desktop actions\n" +
       "💻 /terminal — use background shell _(default)_\n" +
-      "🗜️ /compact — compress conversation history\n\n" +
-      "💡 I can remember things! Try: _Remember my name is Gautam_",
+      "🗜️ /compact — compress conversation history\n" +
+      "📅 /plan — create or rebuild today's plan\n" +
+      "📋 /today — show today's plan\n" +
+      "🌙 /review — run the evening review now\n\n" +
+      "💡 Try: _Plan my day around DBMS revision and one LeetCode problem_",
     { parse_mode: "Markdown" }
   );
 });
@@ -100,6 +104,43 @@ bot.command("compact", async (ctx) => {
   const history = getHistory(chatId);
   const result = compactHistory(history);
   await ctx.reply(`🗜️ ${result}`, { parse_mode: "Markdown" });
+});
+
+bot.command("plan", async (ctx) => {
+  const chatId = ctx.chat.id;
+  const interfaceMode = getInterfaceMode(chatId);
+  const prompt = ctx.match?.trim();
+
+  await ctx.replyWithChatAction("typing");
+
+  try {
+    const instruction = prompt
+      ? `Create or rebuild my plan for today using these constraints: ${prompt}. Use the daily plan tools, keep it to at most 3 must-do items, and sync it to Todoist when the plan is final.`
+      : "Help me create my plan for today. If critical details are missing, ask a concise follow-up. Once you have enough information, create the plan with daily plan tools and sync it to Todoist.";
+    const response = await runAgentLoop(chatId, instruction, interfaceMode);
+    await replyText(ctx, response);
+  } catch (error) {
+    console.error("❌ Plan command error:", error);
+    await ctx.reply("Could not build today's plan right now. Please try again.");
+  }
+});
+
+bot.command("today", async (ctx) => {
+  const chatId = ctx.chat.id;
+  const plan = getDailyPlan(chatId);
+  await replyText(ctx, formatDailyPlan(plan));
+});
+
+bot.command("review", async (ctx) => {
+  await ctx.replyWithChatAction("typing");
+  const { sendEveningReview } = await import("./heartbeat.js");
+  await sendEveningReview(ctx.chat.id);
+});
+
+bot.command("morning", async (ctx) => {
+  await ctx.replyWithChatAction("typing");
+  const { sendMorningCheckIn } = await import("./heartbeat.js");
+  await sendMorningCheckIn(ctx.chat.id);
 });
 
 // ── /codex command ─────────────────────────────────────────────
@@ -346,4 +387,19 @@ function splitMessage(text: string, maxLength: number): string[] {
   }
 
   return chunks;
+}
+
+async function replyText(
+  ctx: Context,
+  text: string,
+): Promise<void> {
+  if (text.length <= 4096) {
+    await ctx.reply(text);
+    return;
+  }
+
+  const chunks = splitMessage(text, 4096);
+  for (const chunk of chunks) {
+    await ctx.reply(chunk);
+  }
 }

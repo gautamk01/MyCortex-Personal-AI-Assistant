@@ -9,7 +9,7 @@ import { runAgentLoop } from "./agent.js";
 import { getInterfaceMode } from "./bot.js";
 import { closeAllTerminals } from "./tools/terminal.js";
 import { initMemory } from "./memory/index.js";
-import { startHeartbeat, stopHeartbeat, sendTestCheckIn } from "./heartbeat.js";
+import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
 
 // ── Load tools before starting ─────────────────────────────────
 
