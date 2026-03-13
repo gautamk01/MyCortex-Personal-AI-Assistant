@@ -155,7 +155,7 @@ export function searchGraph(chatId: number, query: string): string {
 export function getGraphContext(chatId: number): string {
   const entities = getDb()
     .prepare(
-      "SELECT name, type FROM entities WHERE chatId = ? ORDER BY updatedAt DESC LIMIT 10"
+      "SELECT name, type FROM entities WHERE chatId = ? ORDER BY updatedAt DESC LIMIT 40"
     )
     .all(chatId) as Array<{ name: string; type: string }>;
 
@@ -163,7 +163,7 @@ export function getGraphContext(chatId: number): string {
 
   const relations = getDb()
     .prepare(
-      "SELECT fromEntity, relationType, toEntity FROM relations WHERE chatId = ? ORDER BY createdAt DESC LIMIT 10"
+      "SELECT fromEntity, relationType, toEntity FROM relations WHERE chatId = ? ORDER BY createdAt DESC LIMIT 40"
     )
     .all(chatId) as Array<{
     fromEntity: string;

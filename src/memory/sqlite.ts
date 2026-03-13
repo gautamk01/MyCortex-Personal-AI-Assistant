@@ -171,8 +171,8 @@ export function getMemoryContext(chatId: number): string {
   const stmt = getDb().prepare(`
     SELECT key, value, category FROM facts
     WHERE chatId = ?
-    ORDER BY importance DESC, accessCount DESC, updatedAt DESC
-    LIMIT 15
+    ORDER BY importance DESC, updatedAt DESC, accessCount DESC
+    LIMIT 40
   `);
   const rows = stmt.all(chatId) as Array<{
     key: string;

@@ -1,0 +1,12 @@
+node_modules
+dist
+data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+tts-server/venv
+tts-server/venv/
+.env
+LLM_Developments_Report.pdf
+.git
