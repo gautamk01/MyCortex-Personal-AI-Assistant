@@ -11,6 +11,16 @@ import { pruneContext } from "./memory/context-pruner.js";
 import { storeEpisode } from "./memory/semantic-memory.js";
 import { autoExtract } from "./memory/auto-extract.js";
 
+export type AgentProgressPhase =
+  | "checking_memory"
+  | "thinking"
+  | "using_tools"
+  | "writing_response";
+
+export interface AgentProgressReporter {
+  update: (phase: AgentProgressPhase) => void | Promise<void>;
+}
+
 // ── Per-chat conversation history ──────────────────────────────
 
 const conversations = new Map<number, ChatCompletionMessageParam[]>();
@@ -32,7 +42,8 @@ export function getHistory(chatId: number): ChatCompletionMessageParam[] {
 export async function runAgentLoop(
   chatId: number,
   userMessage: string,
-  interfaceMode: "gui" | "terminal" = "terminal"
+  interfaceMode: "gui" | "terminal" = "terminal",
+  progress?: AgentProgressReporter,
 ): Promise<string> {
   const history = getHistory(chatId);
   const tools = getToolDefinitions();
@@ -49,6 +60,7 @@ export async function runAgentLoop(
     iterations++;
 
     // Build system prompt with memory context (includes semantic search)
+    await progress?.update("checking_memory");
     const memoryContext = await getFullMemoryContext(chatId, userMessage);
     const systemPrompt = getSystemPrompt(interfaceMode) + memoryContext;
 
@@ -56,6 +68,7 @@ export async function runAgentLoop(
     let response;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
+        await progress?.update("thinking");
         response = await chat(systemPrompt, history, tools);
         break;
       } catch (err: unknown) {
@@ -86,6 +99,7 @@ export async function runAgentLoop(
 
     // If model is done (no tool calls), return the text
     if (choice.finish_reason === "stop" || !message.tool_calls || message.tool_calls.length === 0) {
+      await progress?.update("writing_response");
       const finalText = message.content ?? "I processed your request but have no text response.";
 
       // Fire-and-forget: store episode in semantic memory + auto-extract
@@ -97,6 +111,7 @@ export async function runAgentLoop(
 
     // If model wants to use tools, execute them
     if (choice.finish_reason === "tool_calls" || message.tool_calls.length > 0) {
+      await progress?.update("using_tools");
       const toolResults = await executeToolCalls(chatId, message.tool_calls);
 
       // Append each tool result to history
@@ -125,7 +140,7 @@ export async function runAgentLoop(
  */
 async function executeToolCalls(
   chatId: number,
-  toolCalls: ChatCompletionToolCall[]
+  toolCalls: ChatCompletionToolCall[],
 ): Promise<ChatCompletionMessageParam[]> {
   const results: ChatCompletionMessageParam[] = [];
 

@@ -1,7 +1,12 @@
 import { Bot, InputFile, type Context } from "grammy";
 import { formatDailyPlan, getDailyPlan } from "./daily-plan.js";
 import { config } from "./config.js";
-import { runAgentLoop, getHistory } from "./agent.js";
+import {
+  runAgentLoop,
+  getHistory,
+  type AgentProgressPhase,
+  type AgentProgressReporter,
+} from "./agent.js";
 import { textToSpeech } from "./tts.js";
 import { compactHistory } from "./memory/context-pruner.js";
 
@@ -110,18 +115,19 @@ bot.command("plan", async (ctx) => {
   const chatId = ctx.chat.id;
   const interfaceMode = getInterfaceMode(chatId);
   const prompt = ctx.match?.trim();
-
-  await ctx.replyWithChatAction("typing");
+  const progress = await createProgressController(ctx, "typing");
 
   try {
     const instruction = prompt
       ? `Create or rebuild my plan for today using these constraints: ${prompt}. Use the daily plan tools, keep it to at most 3 must-do items, and sync it to Todoist when the plan is final.`
       : "Help me create my plan for today. If critical details are missing, ask a concise follow-up. Once you have enough information, create the plan with daily plan tools and sync it to Todoist.";
-    const response = await runAgentLoop(chatId, instruction, interfaceMode);
+    const response = await runAgentLoop(chatId, instruction, interfaceMode, progress.reporter);
     await replyText(ctx, response);
   } catch (error) {
     console.error("❌ Plan command error:", error);
     await ctx.reply("Could not build today's plan right now. Please try again.");
+  } finally {
+    await progress.cleanup();
   }
 });
 
@@ -132,15 +138,23 @@ bot.command("today", async (ctx) => {
 });
 
 bot.command("review", async (ctx) => {
-  await ctx.replyWithChatAction("typing");
+  const progress = await createProgressController(ctx, "typing");
   const { sendEveningReview } = await import("./heartbeat.js");
-  await sendEveningReview(ctx.chat.id);
+  try {
+    await sendEveningReview(ctx.chat.id);
+  } finally {
+    await progress.cleanup();
+  }
 });
 
 bot.command("morning", async (ctx) => {
-  await ctx.replyWithChatAction("typing");
+  const progress = await createProgressController(ctx, "typing");
   const { sendMorningCheckIn } = await import("./heartbeat.js");
-  await sendMorningCheckIn(ctx.chat.id);
+  try {
+    await sendMorningCheckIn(ctx.chat.id);
+  } finally {
+    await progress.cleanup();
+  }
 });
 
 // ── /codex command ─────────────────────────────────────────────
@@ -161,7 +175,7 @@ bot.command("codex", async (ctx) => {
     return;
   }
 
-  await ctx.replyWithChatAction("typing");
+  const progress = await createProgressController(ctx, "typing");
 
   try {
     const { execFile } = await import("node:child_process");
@@ -171,6 +185,7 @@ bot.command("codex", async (ctx) => {
 
     const CODEX_BIN = "/home/gautam/.nvm/versions/node/v22.17.0/bin/codex";
     const outputFile = join(tmpdir(), `gclaw-codex-direct-${Date.now()}.txt`);
+    await progress.reporter.update("using_tools");
 
     const response = await new Promise<string>((resolve, reject) => {
       execFile(
@@ -207,6 +222,8 @@ bot.command("codex", async (ctx) => {
     }
   } catch (error) {
     await ctx.reply(`❌ Codex error: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    await progress.cleanup();
   }
 });
 
@@ -218,11 +235,13 @@ bot.on("message:text", async (ctx) => {
   const mode = getMode(chatId);
   const interfaceMode = getInterfaceMode(chatId);
 
-  // Show appropriate action indicator
-  await ctx.replyWithChatAction(mode === "voice" ? "record_voice" : "typing");
+  const progress = await createProgressController(
+    ctx,
+    mode === "voice" ? "record_voice" : "typing",
+  );
 
   try {
-    const response = await runAgentLoop(chatId, userMessage, interfaceMode);
+    const response = await runAgentLoop(chatId, userMessage, interfaceMode, progress.reporter);
 
     if (mode === "text") {
       // ── Text mode: send text only ──
@@ -259,6 +278,8 @@ bot.on("message:text", async (ctx) => {
   } catch (error) {
     console.error("❌ Agent error:", error);
     await ctx.reply("Something went wrong while processing your message. Please try again.");
+  } finally {
+    await progress.cleanup();
   }
 });
 
@@ -269,7 +290,10 @@ bot.on("message:voice", async (ctx) => {
   const mode = getMode(chatId);
   const interfaceMode = getInterfaceMode(chatId);
 
-  await ctx.replyWithChatAction("typing");
+  const progress = await createProgressController(
+    ctx,
+    mode === "voice" ? "record_voice" : "typing",
+  );
 
   try {
     // 1. Download the voice file
@@ -296,8 +320,7 @@ bot.on("message:voice", async (ctx) => {
     await ctx.reply(`🎙️ *What you said:* "${transcript}"`, { parse_mode: "Markdown" });
 
     // 4. Run the transcript through the AI Agent loop
-    await ctx.replyWithChatAction(mode === "voice" ? "record_voice" : "typing");
-    const response = await runAgentLoop(chatId, transcript, interfaceMode);
+    const response = await runAgentLoop(chatId, transcript, interfaceMode, progress.reporter);
 
     // 5. Reply (respecting text/voice mode preference)
     if (mode === "text") {
@@ -332,6 +355,8 @@ bot.on("message:voice", async (ctx) => {
   } catch (error) {
     console.error("❌ STT/Agent error:", error);
     await ctx.reply("Something went wrong while processing your voice message. Please try again.");
+  } finally {
+    await progress.cleanup();
   }
 });
 
@@ -402,4 +427,101 @@ async function replyText(
   for (const chunk of chunks) {
     await ctx.reply(chunk);
   }
+}
+
+type ProgressAction = "typing" | "record_voice";
+
+function getProgressLabel(phase: AgentProgressPhase): string {
+  switch (phase) {
+    case "checking_memory":
+      return "Checking memory...";
+    case "using_tools":
+      return "Using tools...";
+    case "writing_response":
+      return "Writing response...";
+    case "thinking":
+    default:
+      return "Thinking...";
+  }
+}
+
+async function createProgressController(
+  ctx: Context,
+  action: ProgressAction,
+): Promise<{
+  reporter: AgentProgressReporter;
+  cleanup: () => Promise<void>;
+}> {
+  const chatId = ctx.chat?.id ?? null;
+  let currentLabel = "Thinking...";
+  let cleanedUp = false;
+  let slowTimer: ReturnType<typeof setTimeout> | null = null;
+  let statusMessageId: number | null = null;
+
+  const sendAction = async () => {
+    try {
+      await ctx.replyWithChatAction(action);
+    } catch {
+      // Non-critical
+    }
+  };
+
+  const scheduleSlowUpdate = () => {
+    if (slowTimer) clearTimeout(slowTimer);
+    slowTimer = setTimeout(() => {
+      void setLabel("Still working...");
+    }, 8000);
+  };
+
+  const setLabel = async (nextLabel: string) => {
+    if (cleanedUp || nextLabel === currentLabel) return;
+    currentLabel = nextLabel;
+
+    if (statusMessageId === null || chatId === null) return;
+
+    try {
+      await ctx.api.editMessageText(chatId, statusMessageId, nextLabel);
+    } catch {
+      // Non-critical
+    }
+  };
+
+  await sendAction();
+
+  try {
+    const message = await ctx.reply(currentLabel);
+    statusMessageId = message.message_id;
+  } catch {
+    statusMessageId = null;
+  }
+
+  const actionInterval = setInterval(() => {
+    if (cleanedUp) return;
+    void sendAction();
+  }, 4000);
+
+  scheduleSlowUpdate();
+
+  return {
+    reporter: {
+      update: async (phase: AgentProgressPhase) => {
+        await setLabel(getProgressLabel(phase));
+        scheduleSlowUpdate();
+      },
+    },
+    cleanup: async () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
+      clearInterval(actionInterval);
+      if (slowTimer) clearTimeout(slowTimer);
+
+      if (statusMessageId !== null && chatId !== null) {
+        try {
+          await ctx.api.deleteMessage(chatId, statusMessageId);
+        } catch {
+          // Non-critical
+        }
+      }
+    },
+  };
 }

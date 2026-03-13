@@ -35,3 +35,5 @@ You can try it out right now! Send a message to the bot on Telegram to confirm i
   temporary and may be lost after reboot or reconnect. If you
   want, I can make the DNS change persistent through
   NetworkManager for your Gautam's S23 connection.
+  Token usage: total=773,605 input=702,439 (+ 8,894,464 cached) output=71,166 (reasoning 22,622)
+To continue this session, run codex resume 019ce8ba-00d8-7aa0-bf52-8f6970838034
