@@ -5,6 +5,7 @@ Student OS is the daily planning and accountability layer inside Gravity Claw. I
 - a local daily plan
 - Todoist sync
 - a daily work Excel tracker
+- one-time Telegram reminders
 - morning and evening accountability
 - EXP and level tracking
 
@@ -350,6 +351,30 @@ That means the assistant can respond with awareness of:
 
 This makes it more useful for study guidance during the day.
 
+### 17. One-Time Telegram Reminders
+
+Student OS can now create one-time Telegram reminders for things like:
+
+- `Remind me to buy milk at 4 PM`
+- `Remind me to leave for college at 8:45`
+- `Remind me to call home at 9 PM`
+
+Current reminder behavior:
+
+- one-time reminders only
+- inline buttons when the reminder fires
+- quick actions:
+  - `Done`
+  - `10m`
+  - `30m`
+  - `1h`
+- ignored reminders do not repeat automatically
+
+Current limitation:
+
+- reminders are in-memory only in the current version
+- if the bot restarts, pending reminders are lost
+
 ## Current Tool-Level Capabilities
 
 Student OS currently exposes these internal planning tools to the agent:
@@ -379,6 +404,10 @@ Related existing productivity tools still available:
 - `update_life_log`
 - `delete_life_log`
 - `summarize_life_logs`
+- `create_reminder`
+- `list_reminders`
+- `cancel_reminder`
+- `snooze_reminder`
 - `check_level`
 - `log_habit`
 - LeetCode Google Sheets tools
@@ -395,6 +424,7 @@ Student OS works well for:
 - seeing how much time went into studying vs project work vs distractions
 - reconstructing the actual timeline of the day
 - checking wake-up, meals, breaks, work blocks, and sleep timing
+- setting one-time nudges during the day without using Todoist
 - checking off progress during the day
 - end-of-day accountability
 - balancing study, coding, assignments, and health

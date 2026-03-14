@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { bot } from "./bot.js";
+import { bot, sendReminderNotification } from "./bot.js";
 import { loadTools } from "./tools/index.js";
 import { setSchedulerCallback, stopAllTasks } from "./scheduler/index.js";
 import { setWebhookCallback, startWebhookServer, stopWebhookServer } from "./webhooks/index.js";
@@ -10,6 +10,7 @@ import { getInterfaceMode } from "./bot.js";
 import { closeAllTerminals } from "./tools/terminal.js";
 import { initMemory } from "./memory/index.js";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
+import { setReminderDispatch, stopAllReminders } from "./reminders.js";
 
 // ── Load tools before starting ─────────────────────────────────
 
@@ -46,6 +47,14 @@ setWebhookCallback(async (chatId, message) => {
   }
 });
 
+setReminderDispatch(async (reminder) => {
+  try {
+    await sendReminderNotification(reminder);
+  } catch (err) {
+    console.error(`❌ Reminder dispatch failed for chat ${reminder.chatId}:`, err);
+  }
+});
+
 // Start webhook HTTP server
 startWebhookServer();
 
@@ -69,6 +78,7 @@ async function shutdown() {
   console.log("\n👋 Shutting down…");
   bot.stop();
   stopAllTasks();
+  stopAllReminders();
   stopHeartbeat();
   stopWebhookServer();
   await closeMCPBridge();

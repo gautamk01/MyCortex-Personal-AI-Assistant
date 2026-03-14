@@ -69,4 +69,5 @@ export async function loadTools(): Promise<void> {
   await import("./codex.js");
   await import("./daily-plan-tools.js");
   await import("./gamification-tools.js");
+  await import("./reminders-tools.js");
 }

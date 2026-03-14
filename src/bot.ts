@@ -1,4 +1,4 @@
-import { Bot, InputFile, type Context } from "grammy";
+import { Bot, InlineKeyboard, InputFile, type Context } from "grammy";
 import { formatDailyPlan, getDailyPlan } from "./daily-plan.js";
 import { config } from "./config.js";
 import {
@@ -9,10 +9,18 @@ import {
 } from "./agent.js";
 import { textToSpeech } from "./tts.js";
 import { compactHistory } from "./memory/context-pruner.js";
+import {
+  getReminderDueLabel,
+  markReminderDone,
+  snoozeReminder,
+  type ReminderRecord,
+} from "./reminders.js";
 
 // ── Create bot ─────────────────────────────────────────────────
 
 export const bot = new Bot(config.telegramBotToken);
+
+const REMINDER_CALLBACK_PREFIX = "reminder";
 
 // ── Per-chat reply mode ────────────────────────────────────────
 
@@ -59,9 +67,69 @@ bot.command("start", async (ctx) => {
       "📅 /plan — create or rebuild today's plan\n" +
       "📋 /today — show today's plan\n" +
       "🌙 /review — run the evening review now\n\n" +
-      "💡 Try: _Plan my day around DBMS revision and one LeetCode problem_",
+      "💡 Try: _Plan my day around DBMS revision and one LeetCode problem_\n" +
+      "💡 Try: _Remind me to buy milk at 4 PM_",
     { parse_mode: "Markdown" }
   );
+});
+
+bot.on("callback_query:data", async (ctx) => {
+  const payload = ctx.callbackQuery.data;
+  if (!payload.startsWith(`${REMINDER_CALLBACK_PREFIX}:`)) {
+    return;
+  }
+
+  const parts = payload.split(":");
+  const action = parts[1];
+
+  try {
+    if (action === "done") {
+      const reminderId = parts[2];
+      const reminder = markReminderDone(reminderId);
+      if (!reminder) {
+        await ctx.answerCallbackQuery({ text: "Reminder no longer active." });
+        return;
+      }
+
+      if (ctx.callbackQuery.message) {
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          ctx.callbackQuery.message.message_id,
+          `✅ Reminder done: ${reminder.text}`,
+        );
+      }
+
+      await ctx.answerCallbackQuery({ text: "Marked done." });
+      return;
+    }
+
+    if (action === "snooze") {
+      const minutes = Number(parts[2]);
+      const reminderId = parts[3];
+      const reminder = snoozeReminder(reminderId, minutes);
+      if (!reminder) {
+        await ctx.answerCallbackQuery({ text: "Reminder no longer active." });
+        return;
+      }
+
+      const nextDue = getReminderDueLabel(reminder);
+      if (ctx.callbackQuery.message) {
+        await ctx.api.editMessageText(
+          ctx.chat!.id,
+          ctx.callbackQuery.message.message_id,
+          `😴 Snoozed "${reminder.text}" until ${nextDue}.`,
+        );
+      }
+
+      await ctx.answerCallbackQuery({ text: `Snoozed for ${minutes}m.` });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: "Unknown reminder action." });
+  } catch (error) {
+    console.error("❌ Reminder callback failed:", error);
+    await ctx.answerCallbackQuery({ text: "Reminder action failed." });
+  }
 });
 
 // ── /text command ──────────────────────────────────────────────
@@ -427,6 +495,32 @@ async function replyText(
   for (const chunk of chunks) {
     await ctx.reply(chunk);
   }
+}
+
+function buildReminderKeyboard(reminderId: string): InlineKeyboard {
+  return new InlineKeyboard()
+    .text("Done", `${REMINDER_CALLBACK_PREFIX}:done:${reminderId}`)
+    .row()
+    .text("10m", `${REMINDER_CALLBACK_PREFIX}:snooze:10:${reminderId}`)
+    .text("30m", `${REMINDER_CALLBACK_PREFIX}:snooze:30:${reminderId}`)
+    .text("1h", `${REMINDER_CALLBACK_PREFIX}:snooze:60:${reminderId}`);
+}
+
+export async function sendReminderNotification(reminder: ReminderRecord): Promise<void> {
+  const lines = [
+    "⏰ Reminder",
+    "",
+    reminder.text,
+    "",
+    `Due: ${getReminderDueLabel(reminder)}`,
+    reminder.notes ? `Note: ${reminder.notes}` : "",
+    "",
+    "Done or snooze it?",
+  ].filter(Boolean);
+
+  await bot.api.sendMessage(reminder.chatId, lines.join("\n"), {
+    reply_markup: buildReminderKeyboard(reminder.id),
+  });
 }
 
 type ProgressAction = "typing" | "record_voice";
