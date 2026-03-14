@@ -295,6 +295,93 @@ export function getMemoryContext(chatId: number): string {
   return `\n## Stored Memories\n${lines.join("\n")}`;
 }
 
+export interface UserIdentity {
+  nickname: string;
+  preferredName: string;
+  name: string;
+  displayName: string;
+  displaySource: "nickname" | "preferred_name" | "name" | "neutral";
+}
+
+export function resolveUserIdentity(chatId: number): UserIdentity {
+  const rows = getDb()
+    .prepare(`
+      SELECT key, value
+      FROM facts
+      WHERE chatId = ?
+        AND key IN ('nickname', 'preferred_name', 'name', 'father_name', 'dad_name', 'mother_name')
+    `)
+    .all(chatId) as Array<{ key: string; value: string }>;
+
+  const values = new Map(rows.map((row) => [row.key.toLowerCase(), row.value.trim()]));
+  const nickname = values.get("nickname") ?? "";
+  const preferredName = values.get("preferred_name") ?? "";
+  const name = values.get("name") ?? "";
+  const familyNames = new Set([
+    values.get("father_name"),
+    values.get("dad_name"),
+    values.get("mother_name"),
+  ].filter((value): value is string => Boolean(value)));
+
+  if (nickname) {
+    return {
+      nickname,
+      preferredName,
+      name,
+      displayName: nickname,
+      displaySource: "nickname",
+    };
+  }
+
+  if (preferredName) {
+    return {
+      nickname,
+      preferredName,
+      name,
+      displayName: preferredName,
+      displaySource: "preferred_name",
+    };
+  }
+
+  if (name && !familyNames.has(name)) {
+    return {
+      nickname,
+      preferredName,
+      name,
+      displayName: name,
+      displaySource: "name",
+    };
+  }
+
+  return {
+    nickname,
+    preferredName,
+    name,
+    displayName: "",
+    displaySource: "neutral",
+  };
+}
+
+export function getUserIdentityContext(chatId: number): string {
+  const identity = resolveUserIdentity(chatId);
+  const lines = [
+    "\n## User Identity",
+    `- display_name: ${identity.displayName || "unknown"}`,
+    `- display_source: ${identity.displaySource}`,
+    `- nickname: ${identity.nickname || "unknown"}`,
+    `- preferred_name: ${identity.preferredName || "unknown"}`,
+    `- name: ${identity.name || "unknown"}`,
+  ];
+
+  if (identity.displayName) {
+    lines.push("- use the resolved display_name naturally in most replies, but do not force it into every sentence");
+  } else {
+    lines.push("- no reliable nickname or display name is known yet");
+  }
+
+  return lines.join("\n");
+}
+
 // ── Gamification CRUD ──────────────────────────────────────────
 
 export function getUserStats(chatId: number): { level: number; totalExp: number } {

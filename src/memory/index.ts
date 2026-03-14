@@ -7,6 +7,7 @@ import {
   recallFacts,
   forgetFact,
   getMemoryContext,
+  getUserIdentityContext,
 } from "./sqlite.js";
 import { getGraphContext, registerGraphTools } from "./knowledge-graph.js";
 import { getNotesContext, registerMarkdownTools } from "./markdown.js";
@@ -61,6 +62,9 @@ export async function getFullMemoryContext(
 
   const coachCtx = getCoachProfileContext(chatId);
   if (coachCtx) parts.push(coachCtx);
+
+  const identityCtx = getUserIdentityContext(chatId);
+  if (identityCtx) parts.push(identityCtx);
 
   const factCtx = getMemoryContext(chatId);
   if (factCtx) parts.push(factCtx);
