@@ -13,6 +13,7 @@ import { getNotesContext, registerMarkdownTools } from "./markdown.js";
 import { getMediaContext, registerMultimodalTools } from "./multimodal.js";
 import { registerEvolutionTools } from "./evolution.js";
 import { getDailyPlanContext } from "../daily-plan.js";
+import { getCoachProfileContext, getRecentDailySummaryContext } from "../coach.js";
 import {
   initSemanticMemory,
   getSemanticContext,
@@ -58,6 +59,9 @@ export async function getFullMemoryContext(
   const planCtx = getDailyPlanContext(chatId);
   if (planCtx) parts.push(planCtx);
 
+  const coachCtx = getCoachProfileContext(chatId);
+  if (coachCtx) parts.push(coachCtx);
+
   const factCtx = getMemoryContext(chatId);
   if (factCtx) parts.push(factCtx);
 
@@ -66,6 +70,9 @@ export async function getFullMemoryContext(
 
   const notesCtx = getNotesContext(chatId);
   if (notesCtx) parts.push(notesCtx);
+
+  const summaryCtx = getRecentDailySummaryContext(chatId);
+  if (summaryCtx) parts.push(summaryCtx);
 
   const mediaCtx = getMediaContext(chatId);
   if (mediaCtx) parts.push(mediaCtx);

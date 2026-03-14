@@ -66,7 +66,9 @@ bot.command("start", async (ctx) => {
       "🗜️ /compact — compress conversation history\n" +
       "📅 /plan — create or rebuild today's plan\n" +
       "📋 /today — show today's plan\n" +
-      "🌙 /review — run the evening review now\n\n" +
+      "🌙 /review — run the evening review now\n" +
+      "⏱️ /hourly — send one hourly check-in now\n" +
+      "🧠 /daysummary — show today's stored daily summary\n\n" +
       "💡 Try: _Plan my day around DBMS revision and one LeetCode problem_\n" +
       "💡 Try: _Remind me to buy milk at 4 PM_",
     { parse_mode: "Markdown" }
@@ -223,6 +225,44 @@ bot.command("morning", async (ctx) => {
   } finally {
     await progress.cleanup();
   }
+});
+
+bot.command("hourly", async (ctx) => {
+  const progress = await createProgressController(ctx, "typing");
+  const { sendHourlyCheckIn } = await import("./heartbeat.js");
+  try {
+    await sendHourlyCheckIn(ctx.chat.id);
+  } finally {
+    await progress.cleanup();
+  }
+});
+
+bot.command("daysummary", async (ctx) => {
+  const { getDailySummary, listDailySummaries } = await import("./coach.js");
+  const today = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const year = today.find((part) => part.type === "year")?.value ?? "0000";
+  const month = today.find((part) => part.type === "month")?.value ?? "00";
+  const day = today.find((part) => part.type === "day")?.value ?? "00";
+  const summaryDate = `${year}-${month}-${day}`;
+  const summary = getDailySummary(ctx.chat.id, summaryDate);
+
+  if (!summary) {
+    const latest = listDailySummaries(ctx.chat.id, 1)[0];
+    if (!latest) {
+      await ctx.reply(`No daily summary stored yet for ${summaryDate}.`);
+      return;
+    }
+
+    await replyText(ctx, `${latest.summaryDate}\n\n${latest.summaryText}`);
+    return;
+  }
+
+  await replyText(ctx, `${summary.summaryDate}\n\n${summary.summaryText}`);
 });
 
 // ── /codex command ─────────────────────────────────────────────

@@ -6,6 +6,8 @@ Student OS is the daily planning and accountability layer inside Gravity Claw. I
 - Todoist sync
 - a daily work Excel tracker
 - one-time Telegram reminders
+- adaptive hourly heartbeats
+- daily memory summaries
 - morning and evening accountability
 - EXP and level tracking
 
@@ -375,6 +377,49 @@ Current limitation:
 - reminders are in-memory only in the current version
 - if the bot restarts, pending reminders are lost
 
+### 18. Adaptive Hourly Heartbeats
+
+Student OS now has an hourly accountability loop during active hours.
+
+Current behavior:
+
+- morning heartbeat at `8:00 AM` IST
+- hourly check-ins from `9:00 AM` through `10:00 PM` IST
+- evening review at `8:00 PM` IST
+- each hourly ping is intentionally short
+
+What the hourly heartbeat looks at:
+
+- daily plan progress
+- work-log activity
+- life-log activity
+- reminders
+- recent heartbeat themes
+- coach-state drift and logging reliability
+
+The idea is:
+
+- avoid repetitive pings
+- keep the bot direct and useful
+- ask what you are doing if the logs look empty
+
+### 19. Daily Memory Summaries
+
+At `12:00 AM` IST, Student OS now generates a daily summary for the day that just ended.
+
+This summary is stored in persistent memory/SQLite, not only in chat.
+
+It includes:
+
+- daily plan execution
+- work-log totals
+- life-log totals
+- reminder activity
+- EXP change
+- heartbeat themes used during the day
+
+This is meant to preserve what happened on each specific day for long-term recall.
+
 ## Current Tool-Level Capabilities
 
 Student OS currently exposes these internal planning tools to the agent:
@@ -408,6 +453,8 @@ Related existing productivity tools still available:
 - `list_reminders`
 - `cancel_reminder`
 - `snooze_reminder`
+- `get_daily_summary`
+- `list_daily_summaries`
 - `check_level`
 - `log_habit`
 - LeetCode Google Sheets tools
@@ -425,6 +472,8 @@ Student OS works well for:
 - reconstructing the actual timeline of the day
 - checking wake-up, meals, breaks, work blocks, and sleep timing
 - setting one-time nudges during the day without using Todoist
+- getting short accountability pings during active hours
+- storing what happened each day in long-term memory
 - checking off progress during the day
 - end-of-day accountability
 - balancing study, coding, assignments, and health

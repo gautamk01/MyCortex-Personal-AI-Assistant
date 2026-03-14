@@ -1,3 +1,5 @@
+import { recordReminderEvent } from "./coach.js";
+
 const IST_OFFSET_MINUTES = 5 * 60 + 30;
 const MAX_TIMEOUT_MS = 2_147_483_647;
 
@@ -134,6 +136,7 @@ async function fireReminder(reminderId: string): Promise<void> {
   clearReminderTimeout(reminder);
 
   if (onReminderDue) {
+    recordReminderEvent(reminder.chatId, reminder.id, "fired", reminder.dueAtIso);
     await onReminderDue({
       id: reminder.id,
       chatId: reminder.chatId,
@@ -205,6 +208,10 @@ export function createReminder(input: {
 
   reminders.set(reminder.id, reminder);
   scheduleReminder(reminder);
+  recordReminderEvent(reminder.chatId, reminder.id, "created", reminder.dueAtIso, {
+    text: reminder.text,
+    notes: reminder.notes,
+  });
 
   return {
     id: reminder.id,
@@ -254,6 +261,7 @@ export function cancelReminder(reminderId: string): ReminderRecord | null {
   reminder.status = "cancelled";
   clearReminderTimeout(reminder);
   reminders.delete(reminderId);
+  recordReminderEvent(reminder.chatId, reminder.id, "cancelled", reminder.dueAtIso);
   return {
     id: reminder.id,
     chatId: reminder.chatId,
@@ -272,6 +280,7 @@ export function markReminderDone(reminderId: string): ReminderRecord | null {
   reminder.status = "done";
   clearReminderTimeout(reminder);
   reminders.delete(reminderId);
+  recordReminderEvent(reminder.chatId, reminder.id, "done", reminder.dueAtIso);
   return {
     id: reminder.id,
     chatId: reminder.chatId,
@@ -295,6 +304,9 @@ export function snoozeReminder(reminderId: string, minutes: number): ReminderRec
   reminder.dueAtIso = nextDue.toISOString();
   reminder.status = "scheduled";
   scheduleReminder(reminder);
+  recordReminderEvent(reminder.chatId, reminder.id, "snoozed", reminder.dueAtIso, {
+    minutes: Math.round(minutes),
+  });
 
   return {
     id: reminder.id,

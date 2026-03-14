@@ -24,11 +24,14 @@ export type ChatCompletionToolCall = OpenAI.Chat.Completions.ChatCompletionMessa
 export async function chat(
   systemPrompt: string,
   messages: ChatCompletionMessageParam[],
-  tools: ChatCompletionTool[]
+  tools: ChatCompletionTool[],
+  options?: {
+    maxTokens?: number;
+  },
 ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
   return client.chat.completions.create({
     model: config.llmModel,
-    max_tokens: 4096,
+    max_tokens: options?.maxTokens ?? 4096,
     messages: [
       { role: "system", content: systemPrompt },
       ...messages,

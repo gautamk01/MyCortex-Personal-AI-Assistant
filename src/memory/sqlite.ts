@@ -149,6 +149,60 @@ export function initDatabase(): void {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS coach_profiles (
+      chatId              INTEGER PRIMARY KEY,
+      toneMode            TEXT DEFAULT 'normal',
+      encouragementStyle  TEXT DEFAULT 'warm_firm',
+      pressureStyle       TEXT DEFAULT 'firm',
+      driftScore          REAL DEFAULT 0,
+      loggingReliability  REAL DEFAULT 0.5,
+      activeStartHour     INTEGER DEFAULT 8,
+      activeEndHour       INTEGER DEFAULT 22,
+      updatedAt           TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS heartbeat_events (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId        INTEGER NOT NULL,
+      eventDate     TEXT NOT NULL,
+      eventTime     TEXT NOT NULL,
+      theme         TEXT NOT NULL,
+      toneMode      TEXT NOT NULL,
+      message       TEXT NOT NULL,
+      reason        TEXT DEFAULT '',
+      userResponded INTEGER DEFAULT 0,
+      createdAt     TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS daily_summaries (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId       INTEGER NOT NULL,
+      summaryDate  TEXT NOT NULL,
+      summaryText  TEXT NOT NULL,
+      metricsJson  TEXT NOT NULL,
+      createdAt    TEXT DEFAULT (datetime('now')),
+      updatedAt    TEXT DEFAULT (datetime('now')),
+      UNIQUE(chatId, summaryDate)
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS reminder_events (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId       INTEGER NOT NULL,
+      reminderId   TEXT NOT NULL,
+      eventType    TEXT NOT NULL,
+      dueAtIso     TEXT DEFAULT '',
+      detailsJson  TEXT DEFAULT '{}',
+      createdAt    TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   console.log("🧠 SQLite memory database initialized");
 }
 

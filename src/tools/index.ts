@@ -70,4 +70,5 @@ export async function loadTools(): Promise<void> {
   await import("./daily-plan-tools.js");
   await import("./gamification-tools.js");
   await import("./reminders-tools.js");
+  await import("./coach-tools.js");
 }
