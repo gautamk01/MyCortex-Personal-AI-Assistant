@@ -391,12 +391,71 @@ bot.on("message:text", async (ctx) => {
   }
 });
 
-// ── Handle voice messages ──────────────────────────────────────
+// ── Handle speech input messages ───────────────────────────────
 
-bot.on("message:voice", async (ctx) => {
-  const chatId = ctx.chat.id;
+const MAX_STT_BYTES = 20 * 1024 * 1024;
+
+type SpeechInputDetails = {
+  sourceType: "voice" | "audio" | "document";
+  mimeType: string;
+  filename: string;
+  fileSize: number;
+};
+
+function getSpeechInputDetails(ctx: Context): SpeechInputDetails | null {
+  const message = ctx.message;
+  if (!message) return null;
+
+  if ("voice" in message && message.voice) {
+    return {
+      sourceType: "voice",
+      mimeType: message.voice.mime_type || "audio/ogg",
+      filename: "voice_message.ogg",
+      fileSize: message.voice.file_size || 0,
+    };
+  }
+
+  if ("audio" in message && message.audio) {
+    return {
+      sourceType: "audio",
+      mimeType: message.audio.mime_type || "audio/mpeg",
+      filename: message.audio.file_name || "audio_message",
+      fileSize: message.audio.file_size || 0,
+    };
+  }
+
+  if ("document" in message && message.document) {
+    const mimeType = message.document.mime_type || "";
+    const filename = message.document.file_name || "audio_document";
+    const looksLikeAudio = mimeType.startsWith("audio/") || /\.(ogg|mp3|wav|m4a|aac|webm|mpeg)$/i.test(filename);
+    if (!looksLikeAudio) {
+      return null;
+    }
+
+    return {
+      sourceType: "document",
+      mimeType: mimeType || "application/octet-stream",
+      filename,
+      fileSize: message.document.file_size || 0,
+    };
+  }
+
+  return null;
+}
+
+async function handleSpeechMessage(ctx: Context): Promise<void> {
+  const chatId = ctx.chat?.id;
+  if (!chatId) {
+    return;
+  }
   const mode = getMode(chatId);
   const interfaceMode = getInterfaceMode(chatId);
+  const input = getSpeechInputDetails(ctx);
+
+  if (!input) {
+    await ctx.reply("⚠️ I can only transcribe voice notes or audio files.");
+    return;
+  }
 
   const progress = await createProgressController(
     ctx,
@@ -404,23 +463,34 @@ bot.on("message:voice", async (ctx) => {
   );
 
   try {
-    // 1. Download the voice file
+    if (input.fileSize > MAX_STT_BYTES) {
+      await ctx.reply("⚠️ That audio file is too large for the current transcription path. Send a shorter or compressed recording.");
+      return;
+    }
+
+    // 1. Download the Telegram audio file
     const file = await ctx.getFile();
+    if (!file.file_path) {
+      throw new Error("Telegram did not return a downloadable file path.");
+    }
     const downloadUrl = `https://api.telegram.org/file/bot${config.telegramBotToken}/${file.file_path}`;
-    
+
     // Fetch file contents into a buffer
     const fetch = await import("undici").then(m => m.fetch);
     const audioRes = await fetch(downloadUrl);
-    if (!audioRes.ok) throw new Error("Could not download voice message from Telegram.");
-    
+    if (!audioRes.ok) throw new Error(`Could not download ${input.sourceType} message from Telegram.`);
+
     const audioBuffer = Buffer.from(await audioRes.arrayBuffer());
+    if (audioBuffer.length === 0) {
+      throw new Error("Downloaded audio file is empty.");
+    }
 
     // 2. Transcribe via Sarvam AI
     const { speechToText } = await import("./stt.js");
-    const transcript = await speechToText(audioBuffer, "audio/ogg");
+    const transcript = await speechToText(audioBuffer, input.mimeType, input.filename);
 
     if (!transcript) {
-      await ctx.reply("⚠️ Sorry, I couldn't understand that voice message. The speech-to-text service might be unavailable.");
+      await ctx.reply("⚠️ I couldn't transcribe that audio. The format may be unsupported, the file may be too large, or Sarvam may have rejected it.");
       return;
     }
 
@@ -461,11 +531,20 @@ bot.on("message:voice", async (ctx) => {
       }
     }
   } catch (error) {
-    console.error("❌ STT/Agent error:", error);
-    await ctx.reply("Something went wrong while processing your voice message. Please try again.");
+    console.error(`❌ STT/Agent error [${input.sourceType}] [${input.mimeType}] [${input.filename}] [${input.fileSize} bytes]:`, error);
+    await ctx.reply("Something went wrong while transcribing that audio. Please try again with a shorter or supported recording.");
   } finally {
     await progress.cleanup();
   }
+}
+
+bot.on("message:voice", handleSpeechMessage);
+bot.on("message:audio", handleSpeechMessage);
+bot.on("message:document", async (ctx) => {
+  if (!getSpeechInputDetails(ctx)) {
+    return;
+  }
+  await handleSpeechMessage(ctx);
 });
 
 // ── Helpers ─────────────────────────────────────────────────────

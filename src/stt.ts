@@ -5,7 +5,11 @@ import FormData from "form-data";
 /**
  * Convert audio to text using Sarvam AI STT mapping for both local and production.
  */
-export async function speechToText(audioBuffer: Buffer, mimeType: string = "audio/ogg"): Promise<string | null> {
+export async function speechToText(
+  audioBuffer: Buffer,
+  mimeType: string = "audio/ogg",
+  filename: string = "voice_message.ogg",
+): Promise<string | null> {
   if (!config.sarvamApiKey) {
     console.error("❌ SARVAM_API_KEY is missing. Cannot transcribe audio.");
     return null;
@@ -13,9 +17,8 @@ export async function speechToText(audioBuffer: Buffer, mimeType: string = "audi
 
   try {
     const formData = new FormData();
-    // Pass the buffer directly with explicit filename and mime type
     formData.append("file", audioBuffer, {
-      filename: "voice_message.ogg",
+      filename,
       contentType: mimeType,
     });
     formData.append("prompt", "");
@@ -30,9 +33,11 @@ export async function speechToText(audioBuffer: Buffer, mimeType: string = "audi
 
     return res.data.transcript ?? null;
   } catch (error: any) {
-    const errMsg = error.response ? JSON.stringify(error.response.data) : error.message;
-    console.error(`⚠️  STT Exception: ${errMsg}`);
+    const status = error.response?.status;
+    const body = error.response?.data ? JSON.stringify(error.response.data) : error.message;
+    console.error(
+      `⚠️  STT Exception (${status ?? "no-status"}) [mime=${mimeType}] [file=${filename}] [bytes=${audioBuffer.length}]: ${body}`,
+    );
     return null;
   }
 }
-
