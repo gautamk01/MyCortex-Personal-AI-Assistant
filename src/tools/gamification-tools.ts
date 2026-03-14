@@ -2,15 +2,26 @@ import { registerTool } from "./index.js";
 import { completeDailyPlanItemByTodoistTaskId } from "../daily-plan.js";
 import { getTodayTasks, addTask, completeTask } from "../todoist.js";
 import {
+  deleteLifeLog,
   deleteLeetCodeLog,
   deleteWorkLog,
+  endLifeSession,
+  getLifeLogs,
+  getOpenLifeSession,
   getLeetCodeLogs,
   getWorkLogs,
+  logLifeEventToSheet,
   logLeetCodeToSheet,
   logWorkSessionToSheet,
+  startLifeSession,
+  summarizeLifeLogs,
   summarizeWorkLogs,
+  updateLifeLog,
   updateLeetCodeLog,
   updateWorkLog,
+  type LifeCategory,
+  type LifeEntryType,
+  type LifeSource,
   type WorkCategory,
 } from "../sheets.js";
 import { getUserStats, addExp } from "../memory/sqlite.js";
@@ -166,6 +177,144 @@ registerTool({
   },
 });
 
+registerTool({
+  name: "log_life_event",
+  description:
+    "Log a timestamped life event or completed session to the Life Log sheet. Use for wake-up, meals, study blocks, breaks, travel, sleep, and other day timeline events.",
+  parameters: {
+    type: "object",
+    properties: {
+      activity: { type: "string", description: "Human-readable event label like 'Woke up' or 'DBMS study'." },
+      category: {
+        type: "string",
+        enum: [
+          "sleep",
+          "study",
+          "development",
+          "work",
+          "meal",
+          "exercise",
+          "travel",
+          "break",
+          "entertainment",
+          "personal",
+          "admin",
+          "other",
+        ],
+        description: "Simple life-log category used for summaries.",
+      },
+      tag: { type: "string", description: "Optional subtopic like DBMS, Gym, College, or Gravity Claw." },
+      notes: { type: "string", description: "Optional notes." },
+      source: {
+        type: "string",
+        enum: ["manual", "auto_split", "live"],
+        description: "How this row was created. Default is manual.",
+      },
+      entryType: {
+        type: "string",
+        enum: ["point", "session", "open_session"],
+        description: "Use point for single timestamp events, session for completed ranges, open_session for live tracking.",
+      },
+      startDate: { type: "string", description: "Optional start date in YYYY-MM-DD. Defaults to today in IST." },
+      startTime: { type: "string", description: "Optional start time in HH:MM 24-hour IST. Defaults to current IST time." },
+      endDate: { type: "string", description: "Optional end date in YYYY-MM-DD for completed sessions." },
+      endTime: { type: "string", description: "Optional end time in HH:MM 24-hour IST for completed sessions." },
+      durationMinutes: { type: "number", description: "Optional duration in minutes instead of end time." },
+    },
+    required: ["activity", "category"],
+  },
+  execute: async (input) => {
+    const result = await logLifeEventToSheet({
+      activity: input.activity as string,
+      category: input.category as LifeCategory,
+      tag: input.tag as string | undefined,
+      notes: input.notes as string | undefined,
+      source: input.source as LifeSource | undefined,
+      entryType: input.entryType as LifeEntryType | undefined,
+      startDate: input.startDate as string | undefined,
+      startTime: input.startTime as string | undefined,
+      endDate: input.endDate as string | undefined,
+      endTime: input.endTime as string | undefined,
+      durationMinutes: input.durationMinutes as number | undefined,
+    });
+
+    const durationText = result.row.durationMinutes === null ? "" : ` (${result.row.durationMinutes} mins)`;
+    return `🕒 Logged life event "${result.row.activity}" under ${result.row.category}${durationText}.`;
+  },
+});
+
+registerTool({
+  name: "start_life_session",
+  description:
+    "Start a live life-log session now or at a given start time. If another live session is open, it is auto-closed at the new start time.",
+  parameters: {
+    type: "object",
+    properties: {
+      activity: { type: "string", description: "What is starting, like 'Studying DBMS' or 'Lunch'." },
+      category: {
+        type: "string",
+        enum: [
+          "sleep",
+          "study",
+          "development",
+          "work",
+          "meal",
+          "exercise",
+          "travel",
+          "break",
+          "entertainment",
+          "personal",
+          "admin",
+          "other",
+        ],
+      },
+      tag: { type: "string" },
+      notes: { type: "string" },
+      startDate: { type: "string", description: "Optional start date in YYYY-MM-DD." },
+      startTime: { type: "string", description: "Optional start time in HH:MM 24-hour IST." },
+    },
+    required: ["activity", "category"],
+  },
+  execute: async (input) => {
+    const result = await startLifeSession({
+      activity: input.activity as string,
+      category: input.category as LifeCategory,
+      tag: input.tag as string | undefined,
+      notes: input.notes as string | undefined,
+      startDate: input.startDate as string | undefined,
+      startTime: input.startTime as string | undefined,
+    });
+
+    const autoClosed = result.autoClosedRowNumber
+      ? ` Auto-closed previous open session on row ${result.autoClosedRowNumber}.`
+      : "";
+    return `▶️ Started "${result.row.activity}" at ${result.row.startTime}.${autoClosed}`;
+  },
+});
+
+registerTool({
+  name: "end_life_session",
+  description: "End the current open life-log session now or at a specified time.",
+  parameters: {
+    type: "object",
+    properties: {
+      endDate: { type: "string", description: "Optional end date in YYYY-MM-DD." },
+      endTime: { type: "string", description: "Optional end time in HH:MM 24-hour IST." },
+      notes: { type: "string", description: "Optional notes to append when ending the session." },
+    },
+    required: [],
+  },
+  execute: async (input) => {
+    const result = await endLifeSession({
+      endDate: input.endDate as string | undefined,
+      endTime: input.endTime as string | undefined,
+      notes: input.notes as string | undefined,
+    });
+
+    return `⏹️ Ended "${result.activity}" at ${result.endTime} (${result.durationMinutes} mins).`;
+  },
+});
+
 // ── Gamification Tools ─────────────────────────────────────────
 
 registerTool({
@@ -249,6 +398,45 @@ registerTool({
 });
 
 registerTool({
+  name: "get_life_logs",
+  description: "Fetch recent life-log rows from the Life Log sheet. Defaults to today unless a date range is supplied.",
+  parameters: {
+    type: "object",
+    properties: {
+      limit: { type: "number", description: "Number of recent life logs to fetch (default 10)." },
+      dateFrom: { type: "string", description: "Optional start date in YYYY-MM-DD." },
+      dateTo: { type: "string", description: "Optional end date in YYYY-MM-DD." },
+    },
+    required: [],
+  },
+  execute: async (input) => {
+    const limit = (input.limit as number) || 10;
+    const logs = await getLifeLogs(
+      limit,
+      input.dateFrom as string | undefined,
+      input.dateTo as string | undefined,
+    );
+    if (logs.length === 0) return "No life log rows found for that range.";
+    return JSON.stringify(logs, null, 2);
+  },
+});
+
+registerTool({
+  name: "get_open_life_session",
+  description: "Return the currently open live life-log session, if any.",
+  parameters: {
+    type: "object",
+    properties: {},
+    required: [],
+  },
+  execute: async () => {
+    const session = await getOpenLifeSession();
+    if (!session) return "No open life session found.";
+    return JSON.stringify(session, null, 2);
+  },
+});
+
+registerTool({
   name: "update_leetcode_log",
   description: "Updates an existing LeetCode log row in Google Sheets.",
   parameters: {
@@ -321,6 +509,62 @@ registerTool({
 });
 
 registerTool({
+  name: "update_life_log",
+  description: "Updates an existing life-log row in Google Sheets and recalculates duration when time fields change.",
+  parameters: {
+    type: "object",
+    properties: {
+      rowNumber: { type: "number", description: "The row number to update (get this from get_life_logs)." },
+      startDate: { type: "string" },
+      startTime: { type: "string" },
+      endDate: { type: "string" },
+      endTime: { type: "string" },
+      durationMinutes: { type: "number" },
+      activity: { type: "string" },
+      category: {
+        type: "string",
+        enum: [
+          "sleep",
+          "study",
+          "development",
+          "work",
+          "meal",
+          "exercise",
+          "travel",
+          "break",
+          "entertainment",
+          "personal",
+          "admin",
+          "other",
+        ],
+      },
+      tag: { type: "string" },
+      entryType: { type: "string", enum: ["point", "session", "open_session"] },
+      source: { type: "string", enum: ["manual", "auto_split", "live"] },
+      notes: { type: "string" },
+    },
+    required: ["rowNumber"],
+  },
+  execute: async (input) => {
+    const rowNumber = input.rowNumber as number;
+    await updateLifeLog(rowNumber, {
+      startDate: input.startDate as string | undefined,
+      startTime: input.startTime as string | undefined,
+      endDate: input.endDate as string | undefined,
+      endTime: input.endTime as string | undefined,
+      durationMinutes: input.durationMinutes as number | undefined,
+      activity: input.activity as string | undefined,
+      category: input.category as LifeCategory | undefined,
+      tag: input.tag as string | undefined,
+      entryType: input.entryType as LifeEntryType | undefined,
+      source: input.source as LifeSource | undefined,
+      notes: input.notes as string | undefined,
+    });
+    return `✅ Successfully updated life log row ${rowNumber}.`;
+  },
+});
+
+registerTool({
   name: "delete_leetcode_log",
   description: "Deletes a LeetCode log row in Google Sheets",
   parameters: {
@@ -355,6 +599,23 @@ registerTool({
 });
 
 registerTool({
+  name: "delete_life_log",
+  description: "Deletes a life-log row from Google Sheets.",
+  parameters: {
+    type: "object",
+    properties: {
+      rowNumber: { type: "number", description: "The row number to delete (get this from get_life_logs)." },
+    },
+    required: ["rowNumber"],
+  },
+  execute: async (input) => {
+    const rowNumber = input.rowNumber as number;
+    await deleteLifeLog(rowNumber);
+    return `🗑️ Successfully deleted life log row ${rowNumber}.`;
+  },
+});
+
+registerTool({
   name: "summarize_work_logs",
   description: "Summarize daily work logs by category and tag for a date range. Defaults to today.",
   parameters: {
@@ -383,5 +644,30 @@ registerTool({
       totalsByCategory: summary.totalsByCategory,
       totalsByTag: summary.totalsByTag,
     }, null, 2);
+  },
+});
+
+registerTool({
+  name: "summarize_life_logs",
+  description: "Summarize life-log timeline and totals for a date range. Defaults to today.",
+  parameters: {
+    type: "object",
+    properties: {
+      dateFrom: { type: "string", description: "Optional start date in YYYY-MM-DD format." },
+      dateTo: { type: "string", description: "Optional end date in YYYY-MM-DD format." },
+    },
+    required: [],
+  },
+  execute: async (input) => {
+    const summary = await summarizeLifeLogs(
+      input.dateFrom as string | undefined,
+      input.dateTo as string | undefined,
+    );
+
+    if (summary.timeline.length === 0) {
+      return `No life log rows found between ${summary.dateFrom} and ${summary.dateTo}.`;
+    }
+
+    return JSON.stringify(summary, null, 2);
   },
 });

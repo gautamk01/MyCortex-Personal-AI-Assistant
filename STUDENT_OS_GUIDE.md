@@ -270,7 +270,75 @@ Use cases:
 - delete a wrong row
 - summarize how much time went into each category or tag
 
-### 14. Plan-Aware Memory
+### 14. Life Log Timeline Tracker
+
+Student OS now includes a third Google Sheets tracker called `Life Log`.
+
+This tracker is for timeline-style logging of your day, such as:
+
+- when you woke up
+- when you started studying
+- when you took lunch
+- when you started and ended a project session
+- when you took a break
+- when you slept
+
+Each life-log row stores:
+
+- start date and time
+- end date and time
+- duration
+- activity
+- category
+- tag
+- entry type
+- source
+- notes
+
+Supported life-log categories:
+
+- `sleep`
+- `study`
+- `development`
+- `work`
+- `meal`
+- `exercise`
+- `travel`
+- `break`
+- `entertainment`
+- `personal`
+- `admin`
+- `other`
+
+The life log is separate from the Daily Work Log:
+
+- use `Daily Work Log` when you want a completed work session plus EXP
+- use `Life Log` when you want a timestamped timeline of your day
+
+### 15. Life Log Behaviors
+
+Life Log supports both:
+
+- retrospective logging
+- live start/stop tracking
+
+Examples:
+
+- `I woke up at 7:10`
+- `Had breakfast from 8:00 to 8:20`
+- `Started studying DBMS at 9:00`
+- `Starting lunch now`
+- `Ended lunch at 1:25`
+- `I woke up at 7:20, had breakfast at 8, and started working at 8:30`
+
+Current behavior:
+
+- one message can become multiple life-log rows
+- one live session can stay open at a time
+- starting a new live session auto-closes the previous open one
+- default summaries show both timeline order and category totals
+
+### 16. Plan-Aware Memory
 
 Today’s plan is loaded into the agent context.
 
@@ -303,6 +371,14 @@ Related existing productivity tools still available:
 - `update_work_log`
 - `delete_work_log`
 - `summarize_work_logs`
+- `log_life_event`
+- `start_life_session`
+- `end_life_session`
+- `get_life_logs`
+- `get_open_life_session`
+- `update_life_log`
+- `delete_life_log`
+- `summarize_life_logs`
 - `check_level`
 - `log_habit`
 - LeetCode Google Sheets tools
@@ -317,6 +393,8 @@ Student OS works well for:
 - syncing study tasks to Todoist
 - tracking broader daily work beyond Todoist tasks
 - seeing how much time went into studying vs project work vs distractions
+- reconstructing the actual timeline of the day
+- checking wake-up, meals, breaks, work blocks, and sleep timing
 - checking off progress during the day
 - end-of-day accountability
 - balancing study, coding, assignments, and health
@@ -348,6 +426,8 @@ These are not fully built out yet:
 - exam-mode planning
 - automatic work session timers
 - work log dashboards or charts
+- automatic device-based life tracking
+- weekly life-log analytics or sleep dashboards
 
 ## Best Way to Use It
 
@@ -358,8 +438,9 @@ Recommended daily flow:
 3. Let the bot sync the plan to Todoist
 4. Update or complete items during the day
 5. Log work sessions when you finish studying, building, reading, or wasting time
-6. Run `/today` whenever you need to re-center
-7. Run `/review` at night if you want the reality check before the scheduled heartbeat
+6. Log life events when you care about the actual sequence of your day
+7. Run `/today` whenever you need to re-center
+8. Run `/review` at night if you want the reality check before the scheduled heartbeat
 
 ## Example Prompts
 
@@ -372,6 +453,10 @@ Use prompts like:
 - `Mark item 5 skipped because I ran out of time.`
 - `Sync today’s plan to Todoist.`
 - `Review my day honestly.`
+- `I woke up at 7:15 and started studying at 8.`
+- `Starting work on Gravity Claw now.`
+- `End my current session at 11:40.`
+- `Show my timeline for today.`
 
 ## Implementation Notes
 
