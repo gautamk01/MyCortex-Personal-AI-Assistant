@@ -15,6 +15,11 @@ import {
   snoozeReminder,
   type ReminderRecord,
 } from "./reminders.js";
+import {
+  TELEGRAM_HTML_PARSE_MODE,
+  prepareTelegramHtmlChunks,
+  stripTelegramHtml,
+} from "./telegram-html.js";
 
 // ── Create bot ─────────────────────────────────────────────────
 
@@ -57,21 +62,21 @@ bot.use(async (ctx, next) => {
 
 bot.command("start", async (ctx) => {
   await ctx.reply(
-    "🧠 *Cortex is online.*\n\n" +
+    "🧠 <b>Cortex is online.</b>\n\n" +
       "I'm your personal AI assistant with persistent memory and a daily planning loop.\n\n" +
-      "📝 /text — replies in text only _(default)_\n" +
+      "📝 /text — replies in text only <i>(default)</i>\n" +
       "🔊 /voice — replies in voice only\n" +
       "🖥️ /gui — use visible desktop actions\n" +
-      "💻 /terminal — use background shell _(default)_\n" +
+      "💻 /terminal — use background shell <i>(default)</i>\n" +
       "🗜️ /compact — compress conversation history\n" +
       "📅 /plan — create or rebuild today's plan\n" +
       "📋 /today — show today's plan\n" +
       "🌙 /review — run the evening review now\n" +
       "⏱️ /hourly — send one hourly check-in now\n" +
       "🧠 /daysummary — show today's stored daily summary\n\n" +
-      "💡 Try: _Plan my day around DBMS revision and one LeetCode problem_\n" +
-      "💡 Try: _Remind me to buy milk at 4 PM_",
-    { parse_mode: "Markdown" }
+      "💡 Try: <i>Plan my day around DBMS revision and one LeetCode problem</i>\n" +
+      "💡 Try: <i>Remind me to buy milk at 4 PM</i>",
+    { parse_mode: TELEGRAM_HTML_PARSE_MODE }
   );
 });
 
@@ -138,8 +143,8 @@ bot.on("callback_query:data", async (ctx) => {
 
 bot.command("text", async (ctx) => {
   chatModes.set(ctx.chat.id, "text");
-  await ctx.reply("📝 Switched to *text mode* — I'll reply with text only.", {
-    parse_mode: "Markdown",
+  await ctx.reply("📝 Switched to <b>text mode</b> - I'll reply with text only.", {
+    parse_mode: TELEGRAM_HTML_PARSE_MODE,
   });
 });
 
@@ -147,8 +152,8 @@ bot.command("text", async (ctx) => {
 
 bot.command("voice", async (ctx) => {
   chatModes.set(ctx.chat.id, "voice");
-  await ctx.reply("🔊 Switched to *voice mode* — I'll reply with voice only.", {
-    parse_mode: "Markdown",
+  await ctx.reply("🔊 Switched to <b>voice mode</b> - I'll reply with voice only.", {
+    parse_mode: TELEGRAM_HTML_PARSE_MODE,
   });
 });
 
@@ -158,8 +163,8 @@ bot.command("gui", async (ctx) => {
   interfaceModes.set(ctx.chat.id, "gui");
   const { setBrowserMode } = await import("./tools/browser.js");
   await setBrowserMode("gui");
-  await ctx.reply("🖥️ Switched to *GUI mode* — I'll use visible browser and terminal windows.", {
-    parse_mode: "Markdown",
+  await ctx.reply("🖥️ Switched to <b>GUI mode</b> - I'll use visible browser and terminal windows.", {
+    parse_mode: TELEGRAM_HTML_PARSE_MODE,
   });
 });
 
@@ -167,8 +172,8 @@ bot.command("terminal", async (ctx) => {
   interfaceModes.set(ctx.chat.id, "terminal");
   const { setBrowserMode } = await import("./tools/browser.js");
   await setBrowserMode("terminal");
-  await ctx.reply("💻 Switched to *Terminal mode* — I'll use headless browser and background shell.", {
-    parse_mode: "Markdown",
+  await ctx.reply("💻 Switched to <b>Terminal mode</b> - I'll use headless browser and background shell.", {
+    parse_mode: TELEGRAM_HTML_PARSE_MODE,
   });
 });
 
@@ -178,7 +183,7 @@ bot.command("compact", async (ctx) => {
   const chatId = ctx.chat.id;
   const history = getHistory(chatId);
   const result = compactHistory(history);
-  await ctx.reply(`🗜️ ${result}`, { parse_mode: "Markdown" });
+  await replyText(ctx, `🗜️ ${result}`);
 });
 
 bot.command("plan", async (ctx) => {
@@ -273,12 +278,12 @@ bot.command("codex", async (ctx) => {
 
   if (!prompt) {
     await ctx.reply(
-      "🤖 *Codex CLI*\n\n" +
+      "🤖 <b>Codex CLI</b>\n\n" +
         "Send a prompt after the command:\n" +
-        "`/codex explain this code`\n" +
-        "`/codex write a quicksort in TypeScript`\n\n" +
-        "Or just say _\"ask codex to...\"_ in any message.",
-      { parse_mode: "Markdown" }
+        "/codex explain this code\n" +
+        "/codex write a quicksort in TypeScript\n\n" +
+        "Or just say <i>\"ask codex to...\"</i> in any message.",
+      { parse_mode: TELEGRAM_HTML_PARSE_MODE }
     );
     return;
   }
@@ -314,19 +319,9 @@ bot.command("codex", async (ctx) => {
 
     const trimmed = response.trim();
     if (trimmed.length <= 4096) {
-      await ctx.reply(`🤖 *Codex:*\n\n${trimmed}`, { parse_mode: "Markdown" });
+      await replyText(ctx, `🤖 <b>Codex:</b>\n\n${trimmed}`);
     } else {
-      // Split into chunks
-      const chunks: string[] = [];
-      let remaining = trimmed;
-      while (remaining.length > 0) {
-        const cut = remaining.length <= 4000 ? remaining.length : remaining.lastIndexOf("\n", 4000);
-        chunks.push(remaining.slice(0, cut === -1 ? 4000 : cut));
-        remaining = remaining.slice(cut === -1 ? 4000 : cut).trimStart();
-      }
-      for (let i = 0; i < chunks.length; i++) {
-        await ctx.reply(i === 0 ? `🤖 *Codex:*\n\n${chunks[i]}` : chunks[i], { parse_mode: "Markdown" });
-      }
+      await replyText(ctx, `🤖 <b>Codex:</b>\n\n${trimmed}`);
     }
   } catch (error) {
     await ctx.reply(`❌ Codex error: ${error instanceof Error ? error.message : String(error)}`);
@@ -353,34 +348,23 @@ bot.on("message:text", async (ctx) => {
 
     if (mode === "text") {
       // ── Text mode: send text only ──
-      if (response.length <= 4096) {
-        await ctx.reply(response);
-      } else {
-        const chunks = splitMessage(response, 4096);
-        for (const chunk of chunks) {
-          await ctx.reply(chunk);
-        }
-      }
+      await replyText(ctx, response);
     } else {
       // ── Voice mode: send voice only ──
       try {
-        const cleanText = stripMarkdown(response);
+        const cleanText = stripTelegramHtml(response);
         const audio = await textToSpeech(cleanText);
         if (audio) {
           await ctx.replyWithVoice(new InputFile(audio, "voice.wav"));
         } else {
           // TTS unavailable — fall back to text
-          await ctx.reply(response);
-          await ctx.reply("⚠️ _TTS server is not running. Falling back to text._", {
-            parse_mode: "Markdown",
-          });
+          await replyText(ctx, response);
+          await replyText(ctx, "⚠️ <i>TTS server is not running. Falling back to text.</i>");
         }
       } catch (ttsError) {
         console.warn("⚠️  TTS failed:", ttsError);
-        await ctx.reply(response);
-        await ctx.reply("⚠️ _Voice generation failed. Sent text instead._", {
-          parse_mode: "Markdown",
-        });
+        await replyText(ctx, response);
+        await replyText(ctx, "⚠️ <i>Voice generation failed. Sent text instead.</i>");
       }
     }
   } catch (error) {
@@ -495,39 +479,28 @@ async function handleSpeechMessage(ctx: Context): Promise<void> {
     }
 
     // 3. User feedback: Mirror what they said
-    await ctx.reply(`🎙️ *What you said:* "${transcript}"`, { parse_mode: "Markdown" });
+    await replyText(ctx, `🎙️ <b>What you said:</b> "${transcript}"`);
 
     // 4. Run the transcript through the AI Agent loop
     const response = await runAgentLoop(chatId, transcript, interfaceMode, progress.reporter);
 
     // 5. Reply (respecting text/voice mode preference)
     if (mode === "text") {
-      if (response.length <= 4096) {
-        await ctx.reply(response);
-      } else {
-        const chunks = splitMessage(response, 4096);
-        for (const chunk of chunks) {
-          await ctx.reply(chunk);
-        }
-      }
+      await replyText(ctx, response);
     } else {
       try {
-        const cleanText = stripMarkdown(response);
+        const cleanText = stripTelegramHtml(response);
         const audio = await textToSpeech(cleanText);
         if (audio) {
           await ctx.replyWithVoice(new InputFile(audio, "voice.wav"));
         } else {
-          await ctx.reply(response);
-          await ctx.reply("⚠️ _TTS server is not running. Falling back to text._", {
-            parse_mode: "Markdown",
-          });
+          await replyText(ctx, response);
+          await replyText(ctx, "⚠️ <i>TTS server is not running. Falling back to text.</i>");
         }
       } catch (ttsError) {
         console.warn("⚠️  TTS failed:", ttsError);
-        await ctx.reply(response);
-        await ctx.reply("⚠️ _Voice generation failed. Sent text instead._", {
-          parse_mode: "Markdown",
-        });
+        await replyText(ctx, response);
+        await replyText(ctx, "⚠️ <i>Voice generation failed. Sent text instead.</i>");
       }
     }
   } catch (error) {
@@ -549,70 +522,23 @@ bot.on("message:document", async (ctx) => {
 
 // ── Helpers ─────────────────────────────────────────────────────
 
-/**
- * Strip markdown formatting so TTS reads clean text.
- */
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/```[\s\S]*?```/g, "")       // remove code blocks
-    .replace(/`([^`]+)`/g, "$1")          // inline code → plain text
-    .replace(/!\[.*?\]\(.*?\)/g, "")      // remove images
-    .replace(/\[([^\]]+)\]\(.*?\)/g, "$1") // links → just the text
-    .replace(/^#{1,6}\s+/gm, "")          // remove heading markers
-    .replace(/\*\*\*(.+?)\*\*\*/g, "$1")  // ***bold italic*** → plain
-    .replace(/\*\*(.+?)\*\*/g, "$1")      // **bold** → plain
-    .replace(/\*(.+?)\*/g, "$1")          // *italic* → plain
-    .replace(/__(.+?)__/g, "$1")          // __underline__ → plain
-    .replace(/_(.+?)_/g, "$1")            // _italic_ → plain
-    .replace(/~~(.+?)~~/g, "$1")          // ~~strikethrough~~ → plain
-    .replace(/^[\s]*[-*+]\s/gm, "")       // bullet points → plain
-    .replace(/^\d+\.\s/gm, "")            // numbered lists → plain
-    .replace(/^>\s?/gm, "")               // blockquotes → plain
-    .replace(/---+/g, "")                 // horizontal rules → nothing
-    .replace(/\n{3,}/g, "\n\n")           // collapse excess newlines
-    .trim();
-}
-
-/**
- * Split a long message into chunks that respect Telegram's limit.
- * Tries to split on newlines for clean breaks.
- */
-function splitMessage(text: string, maxLength: number): string[] {
-  const chunks: string[] = [];
-  let remaining = text;
-
-  while (remaining.length > 0) {
-    if (remaining.length <= maxLength) {
-      chunks.push(remaining);
-      break;
-    }
-
-    // Try to split at the last newline within the limit
-    let splitIndex = remaining.lastIndexOf("\n", maxLength);
-    if (splitIndex === -1 || splitIndex < maxLength / 2) {
-      // Fall back to splitting at max length
-      splitIndex = maxLength;
-    }
-
-    chunks.push(remaining.slice(0, splitIndex));
-    remaining = remaining.slice(splitIndex).trimStart();
+export async function sendTelegramText(
+  chatId: number,
+  text: string,
+): Promise<void> {
+  const chunks = prepareTelegramHtmlChunks(text);
+  for (const chunk of chunks) {
+    await bot.api.sendMessage(chatId, chunk, { parse_mode: TELEGRAM_HTML_PARSE_MODE });
   }
-
-  return chunks;
 }
 
 async function replyText(
   ctx: Context,
   text: string,
 ): Promise<void> {
-  if (text.length <= 4096) {
-    await ctx.reply(text);
-    return;
-  }
-
-  const chunks = splitMessage(text, 4096);
+  const chunks = prepareTelegramHtmlChunks(text);
   for (const chunk of chunks) {
-    await ctx.reply(chunk);
+    await ctx.reply(chunk, { parse_mode: TELEGRAM_HTML_PARSE_MODE });
   }
 }
 

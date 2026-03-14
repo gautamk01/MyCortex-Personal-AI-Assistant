@@ -1,5 +1,5 @@
 import { config } from "./config.js";
-import { bot, sendReminderNotification } from "./bot.js";
+import { bot, sendReminderNotification, sendTelegramText } from "./bot.js";
 import { loadTools } from "./tools/index.js";
 import { setSchedulerCallback, stopAllTasks } from "./scheduler/index.js";
 import { setWebhookCallback, startWebhookServer, stopWebhookServer } from "./webhooks/index.js";
@@ -31,7 +31,7 @@ await initMCPBridge();
 setSchedulerCallback(async (chatId, message) => {
   try {
     const response = await runAgentLoop(chatId, message, getInterfaceMode(chatId));
-    await bot.api.sendMessage(chatId, response);
+    await sendTelegramText(chatId, response);
   } catch (err) {
     console.error(`❌ Scheduler callback failed for chat ${chatId}:`, err);
   }
@@ -41,7 +41,7 @@ setSchedulerCallback(async (chatId, message) => {
 setWebhookCallback(async (chatId, message) => {
   try {
     const response = await runAgentLoop(chatId, message, getInterfaceMode(chatId));
-    await bot.api.sendMessage(chatId, response);
+    await sendTelegramText(chatId, response);
   } catch (err) {
     console.error(`❌ Webhook callback failed for chat ${chatId}:`, err);
   }

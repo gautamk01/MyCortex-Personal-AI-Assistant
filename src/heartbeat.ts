@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import { chat, type ChatCompletionMessageParam } from "./llm.js";
 import { config } from "./config.js";
-import { bot } from "./bot.js";
+import { sendTelegramText } from "./bot.js";
 import {
   buildHourlySnapshot,
   chooseHeartbeatTone,
@@ -114,7 +114,7 @@ async function buildEveningMessage(chatId: number): Promise<string> {
 }
 
 async function sendHeartbeatMessage(chatId: number, text: string): Promise<void> {
-  await bot.api.sendMessage(chatId, text);
+  await sendTelegramText(chatId, text);
 }
 
 function chooseTheme(snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>): {
