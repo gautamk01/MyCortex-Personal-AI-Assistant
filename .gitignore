@@ -6,6 +6,7 @@ dist/
 
 # Environment secrets
 .env
+mycontex-*.json
 
 # SQLite databases & memory data
 data/
