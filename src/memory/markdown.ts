@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync, existsSync, statSync } from "node:fs";
 import { join, basename } from "node:path";
 import { config } from "../config.js";
 import { registerTool } from "../tools/index.js";
@@ -17,6 +17,34 @@ function slugify(title: string): string {
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 80);
+}
+
+interface NotesContextCacheEntry {
+  fingerprint: string;
+  titles: string[];
+}
+
+const notesContextCache = new Map<number, NotesContextCacheEntry>();
+
+function extractNoteTitle(content: string, filename: string): string {
+  const titleMatch = content.match(/^title:\s*"(.+)"/m);
+  return titleMatch ? titleMatch[1] : basename(filename, ".md");
+}
+
+function buildNotesFingerprint(dir: string, files: string[]): string {
+  return files
+    .map((file) => `${file}:${statSync(join(dir, file)).mtimeMs}`)
+    .join("|");
+}
+
+function refreshNotesContextCache(chatId: number): NotesContextCacheEntry {
+  const dir = getChatNotesDir(chatId);
+  const files = readdirSync(dir).filter((file) => file.endsWith(".md"));
+  const fingerprint = buildNotesFingerprint(dir, files);
+  const titles = files.map((file) => extractNoteTitle(readFileSync(join(dir, file), "utf-8"), file));
+  const entry = { fingerprint, titles };
+  notesContextCache.set(chatId, entry);
+  return entry;
 }
 
 // ── Note Operations ────────────────────────────────────────────
@@ -44,6 +72,7 @@ export function saveNote(
   ].join("\n");
 
   writeFileSync(filepath, frontmatter + content, "utf-8");
+  refreshNotesContextCache(chatId);
   return `📝 Note saved: ${filename}`;
 }
 
@@ -135,6 +164,7 @@ export function deleteNote(chatId: number, title: string): string {
   }
 
   unlinkSync(filepath);
+  refreshNotesContextCache(chatId);
   return `🗑️ Note deleted: "${title}"`;
 }
 
@@ -143,18 +173,14 @@ export function deleteNote(chatId: number, title: string): string {
  */
 export function getNotesContext(chatId: number): string {
   const dir = getChatNotesDir(chatId);
-
-  if (!existsSync(dir)) return "";
-
   const files = readdirSync(dir).filter((f) => f.endsWith(".md"));
   if (files.length === 0) return "";
 
-  const titles: string[] = [];
-  for (const file of files) {
-    const content = readFileSync(join(dir, file), "utf-8");
-    const titleMatch = content.match(/^title:\s*"(.+)"/m);
-    titles.push(titleMatch ? titleMatch[1] : basename(file, ".md"));
-  }
+  const fingerprint = buildNotesFingerprint(dir, files);
+  const cached = notesContextCache.get(chatId);
+  const titles = cached?.fingerprint === fingerprint
+    ? cached.titles
+    : refreshNotesContextCache(chatId).titles;
 
   return `\n## Saved Notes\n${titles.map((t) => `- ${t}`).join("\n")}`;
 }

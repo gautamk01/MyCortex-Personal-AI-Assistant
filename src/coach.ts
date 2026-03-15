@@ -296,8 +296,10 @@ export async function collectDailySummaryMetrics(
   date: string,
 ): Promise<DailySummaryMetrics> {
   const plan = getDailyPlan(chatId, date);
-  const work = await summarizeWorkLogs(date, date);
-  const life = await summarizeLifeLogs(date, date);
+  const [work, life] = await Promise.all([
+    summarizeWorkLogs(date, date),
+    summarizeLifeLogs(date, date),
+  ]);
 
   let planMetrics: DailySummaryMetrics["plan"] = {
     exists: false,
@@ -481,12 +483,18 @@ export function getRecentDailySummaryContext(chatId: number, limit = 3): string 
   return `\n## Recent Daily Summaries\n${lines.join("\n")}`;
 }
 
-export function chooseHeartbeatTone(chatId: number, lowMoodSignal = false): CoachToneMode {
-  const profile = getCoachProfile(chatId);
+export function chooseHeartbeatToneFromProfile(
+  profile: CoachProfile,
+  lowMoodSignal = false,
+): CoachToneMode {
   if (lowMoodSignal) return "warm_firm";
   if (profile.driftScore >= 1.2) return "strict";
   if (profile.loggingReliability < 0.35) return "warm_firm";
   return profile.toneMode;
+}
+
+export function chooseHeartbeatTone(chatId: number, lowMoodSignal = false): CoachToneMode {
+  return chooseHeartbeatToneFromProfile(getCoachProfile(chatId), lowMoodSignal);
 }
 
 export async function buildHourlySnapshot(chatId: number): Promise<{
@@ -500,12 +508,17 @@ export async function buildHourlySnapshot(chatId: number): Promise<{
 }> {
   const now = getISTDateTime();
   const { listReminders } = await import("./reminders.js");
+  const profile = getCoachProfile(chatId);
+  const [work, life] = await Promise.all([
+    summarizeWorkLogs(now.date, now.date),
+    summarizeLifeLogs(now.date, now.date),
+  ]);
   return {
     date: now.date,
-    profile: getCoachProfile(chatId),
+    profile,
     plan: getDailyPlan(chatId, now.date),
-    work: await summarizeWorkLogs(now.date, now.date),
-    life: await summarizeLifeLogs(now.date, now.date),
+    work,
+    life,
     reminders: listReminders(chatId),
     recentThemes: getRecentHeartbeatThemes(chatId, 3),
   };

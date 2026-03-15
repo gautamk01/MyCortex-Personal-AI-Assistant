@@ -230,7 +230,7 @@ export function recallFacts(chatId: number, query?: string): string {
   let rows;
   if (query) {
     const stmt = getDb().prepare(`
-      SELECT key, value, category, importance, accessCount
+      SELECT id, key, value, category, importance, accessCount
       FROM facts WHERE chatId = ? AND (key LIKE ? OR value LIKE ? OR category LIKE ?)
       ORDER BY importance DESC, accessCount DESC
       LIMIT 20
@@ -239,7 +239,7 @@ export function recallFacts(chatId: number, query?: string): string {
     rows = stmt.all(chatId, pattern, pattern, pattern);
   } else {
     const stmt = getDb().prepare(`
-      SELECT key, value, category, importance, accessCount
+      SELECT id, key, value, category, importance, accessCount
       FROM facts WHERE chatId = ?
       ORDER BY importance DESC, updatedAt DESC
       LIMIT 30
@@ -254,9 +254,7 @@ export function recallFacts(chatId: number, query?: string): string {
   }
 
   // Track access
-  for (const row of rows as Array<{ key: string }>) {
-    trackFactAccess(chatId, row.key);
-  }
+  trackFactAccessBatch((rows as Array<{ id: number }>).map((row) => row.id));
 
   return (rows as Array<{ key: string; value: string; category: string }>)
     .map((r) => `[${r.category}] ${r.key}: ${r.value}`)
@@ -426,22 +424,22 @@ export function addExp(chatId: number, amount: number, reason: string): { newTot
 
 // ── Helpers ────────────────────────────────────────────────────
 
-function trackFactAccess(chatId: number, key: string): void {
-  try {
-    const fact = getDb()
-      .prepare("SELECT id FROM facts WHERE chatId = ? AND key = ?")
-      .get(chatId, key.toLowerCase()) as { id: number } | undefined;
+function trackFactAccessBatch(factIds: number[]): void {
+  if (factIds.length === 0) return;
 
-    if (fact) {
-      getDb()
-        .prepare(
-          "UPDATE facts SET accessCount = accessCount + 1, lastAccessed = datetime('now') WHERE id = ?"
-        )
-        .run(fact.id);
-      getDb()
-        .prepare("INSERT INTO access_log (factId) VALUES (?)")
-        .run(fact.id);
-    }
+  try {
+    const db = getDb();
+    const idPlaceholders = factIds.map(() => "?").join(", ");
+    const insertValues = factIds.map(() => "(?)").join(", ");
+
+    db.transaction((ids: number[]) => {
+      db.prepare(
+        `UPDATE facts
+         SET accessCount = accessCount + 1, lastAccessed = datetime('now')
+         WHERE id IN (${idPlaceholders})`
+      ).run(...ids);
+      db.prepare(`INSERT INTO access_log (factId) VALUES ${insertValues}`).run(...ids);
+    })(factIds);
   } catch {
     // Non-critical — don't break recall on tracking errors
   }

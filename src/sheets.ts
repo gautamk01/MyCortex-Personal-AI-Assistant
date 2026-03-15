@@ -1,4 +1,4 @@
-import { google } from "googleapis";
+import { google, sheets_v4 } from "googleapis";
 import { config } from "./config.js";
 
 const LEETCODE_SHEET_TITLE = "LeetCode Log";
@@ -113,49 +113,81 @@ const LIFE_CATEGORIES = new Set<LifeCategory>([
 const LIFE_ENTRY_TYPES = new Set<LifeEntryType>(["point", "session", "open_session"]);
 const LIFE_SOURCES = new Set<LifeSource>(["manual", "auto_split", "live"]);
 
+type SheetsClient = ReturnType<typeof google.sheets>;
+type SpreadsheetMetadata = {
+  sheets: SheetsClient;
+  spreadsheet: sheets_v4.Schema$Spreadsheet;
+};
+
+let sheetsClientPromise: Promise<SheetsClient> | null = null;
+let spreadsheetMetadataPromise: Promise<SpreadsheetMetadata> | null = null;
+const verifiedSheetTabs = new Set<string>();
+
+function getSheetVerificationKey(title: string, headers: string[]): string {
+  return JSON.stringify([title, headers]);
+}
+
+function invalidateSpreadsheetMetadata(): void {
+  spreadsheetMetadataPromise = null;
+  verifiedSheetTabs.clear();
+}
+
 async function getSheetsClient() {
-  if (!config.googleSheetId) {
-    throw new Error("GOOGLE_SHEET_ID is not configured in .env");
+  if (sheetsClientPromise) {
+    return sheetsClientPromise;
   }
 
-  const authOptions: ConstructorParameters<typeof google.auth.GoogleAuth>[0] = {
-    scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  };
+  sheetsClientPromise = (async () => {
+    if (!config.googleSheetId) {
+      throw new Error("GOOGLE_SHEET_ID is not configured in .env");
+    }
 
-  if (config.googleCredentialsJson) {
-    let credentials: {
-      client_email?: string;
-      private_key?: string;
-      [key: string]: unknown;
+    const authOptions: ConstructorParameters<typeof google.auth.GoogleAuth>[0] = {
+      scopes: ["https://www.googleapis.com/auth/spreadsheets"],
     };
 
-    try {
-      credentials = JSON.parse(config.googleCredentialsJson) as {
+    if (config.googleCredentialsJson) {
+      let credentials: {
         client_email?: string;
         private_key?: string;
         [key: string]: unknown;
       };
-    } catch {
-      throw new Error("GOOGLE_CREDENTIALS_JSON is not valid JSON.");
+
+      try {
+        credentials = JSON.parse(config.googleCredentialsJson) as {
+          client_email?: string;
+          private_key?: string;
+          [key: string]: unknown;
+        };
+      } catch {
+        throw new Error("GOOGLE_CREDENTIALS_JSON is not valid JSON.");
+      }
+
+      if (typeof credentials.private_key === "string") {
+        credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+      }
+
+      authOptions.credentials = credentials;
+    } else if (config.googleCredentialsPath) {
+      authOptions.keyFile = config.googleCredentialsPath;
+    } else {
+      throw new Error(
+        "Google Sheets credentials are not configured. Set GOOGLE_CREDENTIALS_JSON for cloud deploys or GOOGLE_CREDENTIALS_PATH for local runs.",
+      );
     }
 
-    if (typeof credentials.private_key === "string") {
-      credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
-    }
+    const auth = new google.auth.GoogleAuth(authOptions);
 
-    authOptions.credentials = credentials;
-  } else if (config.googleCredentialsPath) {
-    authOptions.keyFile = config.googleCredentialsPath;
-  } else {
-    throw new Error(
-      "Google Sheets credentials are not configured. Set GOOGLE_CREDENTIALS_JSON for cloud deploys or GOOGLE_CREDENTIALS_PATH for local runs.",
-    );
+    const client = await auth.getClient();
+    return google.sheets({ version: "v4", auth: client as never });
+  })();
+
+  try {
+    return await sheetsClientPromise;
+  } catch (error) {
+    sheetsClientPromise = null;
+    throw error;
   }
-
-  const auth = new google.auth.GoogleAuth(authOptions);
-
-  const client = await auth.getClient();
-  return google.sheets({ version: "v4", auth: client as never });
 }
 
 function quoteSheet(title: string): string {
@@ -370,24 +402,40 @@ function resolveLifeTiming(input: {
 }
 
 async function getSpreadsheetMetadata() {
-  const sheets = await getSheetsClient();
-  const spreadsheet = await sheets.spreadsheets.get({
-    spreadsheetId: config.googleSheetId,
-  });
-  return { sheets, spreadsheet };
+  if (!spreadsheetMetadataPromise) {
+    spreadsheetMetadataPromise = (async () => {
+      const sheets = await getSheetsClient();
+      const spreadsheet = await sheets.spreadsheets.get({
+        spreadsheetId: config.googleSheetId,
+      });
+      return { sheets, spreadsheet: spreadsheet.data };
+    })();
+  }
+
+  try {
+    return await spreadsheetMetadataPromise;
+  } catch (error) {
+    spreadsheetMetadataPromise = null;
+    throw error;
+  }
 }
 
 async function getSheetIdByTitle(title: string): Promise<number | null> {
   const { spreadsheet } = await getSpreadsheetMetadata();
-  const sheet = spreadsheet.data.sheets?.find((item) => item.properties?.title === title);
+  const sheet = spreadsheet.sheets?.find((item) => item.properties?.title === title);
   return sheet?.properties?.sheetId ?? null;
 }
 
 async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
+  const verificationKey = getSheetVerificationKey(title, headers);
+  if (verifiedSheetTabs.has(verificationKey)) {
+    return;
+  }
+
   const { sheets, spreadsheet } = await getSpreadsheetMetadata();
   const spreadsheetId = config.googleSheetId;
 
-  const existing = spreadsheet.data.sheets?.find((item) => item.properties?.title === title);
+  const existing = spreadsheet.sheets?.find((item) => item.properties?.title === title);
   if (!existing) {
     await sheets.spreadsheets.batchUpdate({
       spreadsheetId,
@@ -395,6 +443,7 @@ async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
         requests: [{ addSheet: { properties: { title } } }],
       },
     });
+    invalidateSpreadsheetMetadata();
   }
 
   const headerRange = `${quoteSheet(title)}!A1:${String.fromCharCode(64 + headers.length)}1`;
@@ -418,6 +467,8 @@ async function ensureSheetTab(title: string, headers: string[]): Promise<void> {
       },
     });
   }
+
+  verifiedSheetTabs.add(verificationKey);
 }
 
 async function getNextSerialNo(sheetTitle: string): Promise<number> {
@@ -854,6 +905,16 @@ async function getAllLifeLogRows(): Promise<LifeLogRow[]> {
   return rows.slice(1).map((row, index) => mapLifeLogRow(row, index + 2));
 }
 
+function findOpenLifeSession(rows: LifeLogRow[]): LifeLogRow | null {
+  for (let index = rows.length - 1; index >= 0; index -= 1) {
+    if (rows[index].entryType === "open_session") {
+      return rows[index];
+    }
+  }
+
+  return null;
+}
+
 async function updateLifeLogRow(rowNumber: number, row: string[]): Promise<void> {
   const sheets = await getSheetsClient();
   const range = `${quoteSheet(LIFE_LOG_SHEET_TITLE)}!A${rowNumber}:L${rowNumber}`;
@@ -934,14 +995,7 @@ export async function logLifeEventToSheet(input: {
 
 export async function getOpenLifeSession() {
   const rows = await getAllLifeLogRows();
-
-  for (let index = rows.length - 1; index >= 0; index -= 1) {
-    if (rows[index].entryType === "open_session") {
-      return rows[index];
-    }
-  }
-
-  return null;
+  return findOpenLifeSession(rows);
 }
 
 export async function startLifeSession(input: {
@@ -1137,7 +1191,8 @@ export async function summarizeLifeLogs(dateFrom?: string, dateTo?: string) {
   const today = getISTDateTime().date;
   const start = normalizeDate(dateFrom ?? today);
   const end = normalizeDate(dateTo ?? start);
-  const rows = (await getAllLifeLogRows())
+  const allRows = await getAllLifeLogRows();
+  const rows = allRows
     .filter((row) => row.startDate >= start && row.startDate <= end)
     .sort((a, b) => {
       if (a.startDate !== b.startDate) return a.startDate.localeCompare(b.startDate);
@@ -1198,6 +1253,6 @@ export async function summarizeLifeLogs(dateFrom?: string, dateTo?: string) {
     breakMinutes,
     entertainmentMinutes,
     wakeUpTime,
-    openSession: await getOpenLifeSession(),
+    openSession: findOpenLifeSession(allRows),
   };
 }

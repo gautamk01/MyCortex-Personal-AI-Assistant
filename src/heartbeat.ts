@@ -4,7 +4,7 @@ import { config } from "./config.js";
 import { sendTelegramText } from "./bot.js";
 import {
   buildHourlySnapshot,
-  chooseHeartbeatTone,
+  chooseHeartbeatToneFromProfile,
   collectDailySummaryMetrics,
   generateDailySummaryText,
   getCoachProfile,
@@ -264,7 +264,7 @@ export async function sendHourlyCheckIn(chatId: number): Promise<void> {
       snapshot.work.totalMinutes === 0 &&
       snapshot.life.entertainmentMinutes > snapshot.life.focusedMinutes &&
       snapshot.profile.driftScore > 0.8;
-    const tone = chooseHeartbeatTone(chatId, lowMoodSignal);
+    const tone = chooseHeartbeatToneFromProfile(snapshot.profile, lowMoodSignal);
     const { theme, reason } = chooseTheme(snapshot);
     const text = await generateHourlyMessage(snapshot, theme, tone);
     await sendHeartbeatMessage(chatId, text);
