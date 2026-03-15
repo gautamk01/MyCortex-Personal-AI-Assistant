@@ -118,10 +118,41 @@ async function getSheetsClient() {
     throw new Error("GOOGLE_SHEET_ID is not configured in .env");
   }
 
-  const auth = new google.auth.GoogleAuth({
-    keyFile: config.googleCredentialsPath,
+  const authOptions: ConstructorParameters<typeof google.auth.GoogleAuth>[0] = {
     scopes: ["https://www.googleapis.com/auth/spreadsheets"],
-  });
+  };
+
+  if (config.googleCredentialsJson) {
+    let credentials: {
+      client_email?: string;
+      private_key?: string;
+      [key: string]: unknown;
+    };
+
+    try {
+      credentials = JSON.parse(config.googleCredentialsJson) as {
+        client_email?: string;
+        private_key?: string;
+        [key: string]: unknown;
+      };
+    } catch {
+      throw new Error("GOOGLE_CREDENTIALS_JSON is not valid JSON.");
+    }
+
+    if (typeof credentials.private_key === "string") {
+      credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
+    }
+
+    authOptions.credentials = credentials;
+  } else if (config.googleCredentialsPath) {
+    authOptions.keyFile = config.googleCredentialsPath;
+  } else {
+    throw new Error(
+      "Google Sheets credentials are not configured. Set GOOGLE_CREDENTIALS_JSON for cloud deploys or GOOGLE_CREDENTIALS_PATH for local runs.",
+    );
+  }
+
+  const auth = new google.auth.GoogleAuth(authOptions);
 
   const client = await auth.getClient();
   return google.sheets({ version: "v4", auth: client as never });

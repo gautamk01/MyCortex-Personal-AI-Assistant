@@ -97,7 +97,10 @@ export const config = {
   googleSheetId: process.env.GOOGLE_SHEET_ID ?? "",
 
   /** Google Service Account JSON path */
-  googleCredentialsPath: process.env.GOOGLE_CREDENTIALS_PATH ?? resolve("mycontex-238b05fd7b15.json"),
+  googleCredentialsPath: process.env.GOOGLE_CREDENTIALS_PATH ?? "",
+
+  /** Google Service Account JSON contents (preferred for cloud deploys) */
+  googleCredentialsJson: process.env.GOOGLE_CREDENTIALS_JSON ?? "",
 
 
   // ── MCP Bridge ─────────────────────────────────────────────
