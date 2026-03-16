@@ -112,11 +112,14 @@ export const config = {
   skillsDir: process.env.SKILLS_DIR ?? "./skills",
 
   // ── Memory ────────────────────────────────────────────────
+  /** Base directory for persistent data (automatically detects Railway volume) */
+  baseDataDir: process.env.RAILWAY_VOLUME_MOUNT_PATH ?? resolve("./data"),
+
   /** Path to SQLite memory database */
-  memoryDbPath: process.env.MEMORY_DB_PATH ?? "./data/cortex.db",
+  memoryDbPath: process.env.MEMORY_DB_PATH ?? (process.env.RAILWAY_VOLUME_MOUNT_PATH ? `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/cortex.db` : "./data/cortex.db"),
 
   /** Path to markdown notes directory */
-  notesDir: process.env.NOTES_DIR ?? "./data/notes",
+  notesDir: process.env.NOTES_DIR ?? (process.env.RAILWAY_VOLUME_MOUNT_PATH ? `${process.env.RAILWAY_VOLUME_MOUNT_PATH}/notes` : "./data/notes"),
 
   /** Max context tokens before auto-pruning (rough estimate) */
   maxContextTokens: Number(process.env.MAX_CONTEXT_TOKENS) || 6000,

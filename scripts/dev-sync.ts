@@ -1,14 +1,16 @@
 import { spawn } from "node:child_process";
-import { resolve } from "node:path";
-import { writeFileSync, readFileSync, existsSync, mkdirSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { writeFileSync, readFileSync, existsSync, mkdirSync, unlinkSync, readdirSync } from "node:fs";
 import Database from "better-sqlite3";
 import * as dotenv from "dotenv";
+import * as tar from "tar";
 
 dotenv.config();
 
 const SYNC_SECRET = process.env.SYNC_SECRET;
 const PROD_URL = process.env.PROD_WEBHOOK_URL; // e.g. https://mycortex-claw-production.up.railway.app
 const DB_PATH = resolve(process.env.MEMORY_DB_PATH ?? "./data/cortex.db");
+const BASE_DATA_DIR = resolve(DB_PATH, "..");
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 5000; // 5 seconds between retries
@@ -86,8 +88,8 @@ async function resumeRemoteBot() {
 }
 
 async function downloadDatabase() {
-  console.log("⬇️  Downloading production database...");
-  const res = await fetch(`${PROD_URL}/api/sync/db`, {
+  console.log("⬇️  Downloading production data...");
+  const res = await fetch(`${PROD_URL}/api/sync/data`, {
     headers: syncHeaders,
   });
   if (!res.ok) throw new Error(`Download failed: ${await res.text()}`);
@@ -95,47 +97,81 @@ async function downloadDatabase() {
   const buffer = Buffer.from(await res.arrayBuffer());
 
   // Ensure data dir exists
-  const dir = resolve(DB_PATH, "..");
-  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  if (!existsSync(BASE_DATA_DIR)) mkdirSync(BASE_DATA_DIR, { recursive: true });
 
-  writeFileSync(DB_PATH, buffer);
-  console.log(`✅ Downloaded database (${buffer.length} bytes) to ${DB_PATH}`);
+  // Delete local WAL and SHM before extraction
+  if (existsSync(BASE_DATA_DIR)) {
+    const files = readdirSync(BASE_DATA_DIR);
+    for (const file of files) {
+      if (file.endsWith("-wal") || file.endsWith("-shm")) {
+        unlinkSync(join(BASE_DATA_DIR, file));
+        console.log(`   🗑️  Deleted local stale ${file}`);
+      }
+    }
+  }
+
+  const tmpPath = resolve("/tmp/local-sync-download.tar.gz");
+  writeFileSync(tmpPath, buffer);
+
+  await tar.extract({
+    file: tmpPath,
+    cwd: BASE_DATA_DIR,
+  });
+
+  unlinkSync(tmpPath);
+  console.log(`✅ Downloaded and extracted data (${buffer.length} bytes) to ${BASE_DATA_DIR}`);
 
   // Verify the downloaded file is a valid SQLite database
-  try {
-    const testDb = new Database(DB_PATH, { readonly: true });
-    const tables = testDb.prepare(
-      "SELECT name FROM sqlite_master WHERE type='table'"
-    ).all() as Array<{ name: string }>;
-    testDb.close();
-    console.log(`   📋 Tables found: ${tables.map(t => t.name).join(", ")}`);
-  } catch (err) {
-    console.error("⚠️  Downloaded file may not be a valid SQLite database:", err);
+  if (existsSync(DB_PATH)) {
+    try {
+      const testDb = new Database(DB_PATH, { readonly: true });
+      const tables = testDb.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table'"
+      ).all() as Array<{ name: string }>;
+      testDb.close();
+      console.log(`   📋 Tables found: ${tables.map(t => t.name).join(", ")}`);
+    } catch (err) {
+      console.error("⚠️  Downloaded DB may not be a valid SQLite database:", err);
+    }
   }
 }
 
 async function uploadDatabase() {
-  console.log("⬆️  Uploading local database to production...");
-  if (!existsSync(DB_PATH)) {
-    console.log("⚠️  Local database not found, skipping upload.");
+  console.log("⬆️  Uploading local data to production...");
+  if (!existsSync(BASE_DATA_DIR)) {
+    console.log("⚠️  Local data directory not found, skipping upload.");
     return;
   }
 
   // !! CRITICAL: Checkpoint the WAL before reading the file.
-  // SQLite WAL mode keeps all writes in cortex.db-wal (not the main .db file).
-  // Without this, we'd upload a near-empty 4KB file and lose all memories.
-  try {
-    const tmpDb = new Database(DB_PATH);
-    tmpDb.pragma("wal_checkpoint(TRUNCATE)");
-    tmpDb.close();
-    console.log("   ✅ WAL checkpoint complete — all data flushed to main DB file.");
-  } catch (err) {
-    console.warn("   ⚠️  WAL checkpoint failed (proceeding anyway):", err);
+  if (existsSync(DB_PATH)) {
+    try {
+      const tmpDb = new Database(DB_PATH);
+      tmpDb.pragma("wal_checkpoint(TRUNCATE)");
+      tmpDb.close();
+      console.log("   ✅ WAL checkpoint complete — all data flushed to main DB file.");
+    } catch (err) {
+      console.warn("   ⚠️  WAL checkpoint failed (proceeding anyway):", err);
+    }
   }
 
-  const buffer = readFileSync(DB_PATH);
-  console.log(`   📦 DB size after checkpoint: ${(buffer.length / 1024).toFixed(1)} KB`);
-  const res = await fetch(`${PROD_URL}/api/sync/db`, {
+  const tmpPath = resolve("/tmp/local-sync-upload.tar.gz");
+  await tar.create(
+    {
+      gzip: true,
+      file: tmpPath,
+      cwd: BASE_DATA_DIR,
+      filter: (path) => {
+        return !path.endsWith("-wal") && !path.endsWith("-shm");
+      },
+    },
+    ["."]
+  );
+
+  const buffer = readFileSync(tmpPath);
+  console.log(`   📦 Data archive size: ${(buffer.length / 1024).toFixed(1)} KB`);
+  
+  const res = await fetch(`${PROD_URL}/api/sync/data`, {
     method: "POST",
     headers: {
       ...syncHeaders,
@@ -144,9 +180,11 @@ async function uploadDatabase() {
     body: buffer,
   });
 
+  unlinkSync(tmpPath);
+
   if (!res.ok) throw new Error(`Upload failed: ${await res.text()}`);
   const json = await res.json();
-  console.log(`✅ Uploaded database successfully (${json.bytes} bytes).`);
+  console.log(`✅ Uploaded data successfully (${json.bytes} bytes).`);
 }
 
 // ── Main ───────────────────────────────────────────────────────
