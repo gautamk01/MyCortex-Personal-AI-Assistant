@@ -29,13 +29,28 @@ export async function chat(
     maxTokens?: number;
   },
 ): Promise<OpenAI.Chat.Completions.ChatCompletion> {
-  return client.chat.completions.create({
-    model: config.llmModel,
+  const reqOptions = {
     max_tokens: options?.maxTokens ?? 4096,
     messages: [
-      { role: "system", content: systemPrompt },
+      { role: "system" as const, content: systemPrompt },
       ...messages,
     ],
     tools: tools.length > 0 ? tools : undefined,
-  });
+  };
+
+  try {
+    return await client.chat.completions.create({
+      model: config.llmModel,
+      ...reqOptions,
+    });
+  } catch (error) {
+    if (config.backupModel) {
+      console.warn(`⚠️ Primary LLM (${config.llmModel}) failed. Falling back to BACKUP_MODEL (${config.backupModel}). Error:`, error instanceof Error ? error.message : error);
+      return await client.chat.completions.create({
+        model: config.backupModel,
+        ...reqOptions,
+      });
+    }
+    throw error;
+  }
 }

@@ -38,6 +38,9 @@ export const config = {
   /** LLM model to use */
   llmModel: process.env.LLM_MODEL ?? "qwen3:8b",
 
+  /** Backup LLM model to use if the primary model fails */
+  backupModel: process.env.BACKUP_MODEL,
+
   /** Max agentic loop iterations (safety limit) */
   maxAgentIterations: Number(process.env.MAX_AGENT_ITERATIONS) || 10,
 
