@@ -2,6 +2,7 @@ import cron from "node-cron";
 import { chat, type ChatCompletionMessageParam } from "./llm.js";
 import { config } from "./config.js";
 import { sendTelegramText } from "./bot.js";
+import { getHistory } from "./agent.js";
 import {
   buildHourlySnapshot,
   chooseHeartbeatToneFromProfile,
@@ -53,16 +54,25 @@ function getYesterdayDate(): string {
   return getISTDateTime(date).date;
 }
 
+function formatRecentHistory(chatId: number): string {
+  const history = getHistory(chatId);
+  if (!history || history.length === 0) return "No recent context.";
+  const recent = history.slice(-4);
+  return recent
+    .map((msg) => `${msg.role}: ${typeof msg.content === "string" ? msg.content.substring(0, 100) : "..."}`)
+    .join("\n");
+}
+
 function buildMorningMessage(chatId: number): string {
   const stats = getUserStats(chatId);
   const plan = getDailyPlan(chatId);
 
   if (!plan || plan.items.length === 0) {
     return [
-      "Morning plan.",
+      "Good morning.",
       `Level ${stats.level} | ${stats.totalExp} EXP`,
       "No plan is locked in yet.",
-      "Reply with your top 3 must-dos and constraints.",
+      "Reply with your top 3 must-dos and constraints. If you are stuck or don't know what to do, just tell me and we can brainstorm together.",
     ].join("\n");
   }
 
@@ -74,7 +84,7 @@ function buildMorningMessage(chatId: number): string {
     musts.length > 0
       ? `Must-dos: ${musts.map((item) => `${item.title}${item.timeBlock ? ` @ ${item.timeBlock}` : ""}`).join(" | ")}`
       : "No must-do items yet. Tighten the plan.",
-    "Start with the hardest thing first.",
+    "Start with the hardest thing first. I'm here if you get stuck.",
   ].join("\n");
 }
 
@@ -176,6 +186,7 @@ function buildToneInstruction(tone: CoachToneMode): string {
 }
 
 function buildHourlyPrompt(
+  chatId: number,
   snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
   theme: HeartbeatTheme,
   tone: CoachToneMode,
@@ -197,11 +208,12 @@ function buildHourlyPrompt(
     "Return only 1 to 3 short lines.",
     "No fluff. No essay. No generic motivation.",
     "Mention one concrete observation and one direct question or instruction.",
-    "If logs are missing, ask what the user is doing right now so it can be logged.",
+    "If the user was previously working on a task based on the Recent Conversation Context, ask how it is going or if it is done. Otherwise, ask what they are doing right now so it can be logged.",
     "",
     `Theme: ${theme}`,
     `Date: ${snapshot.date}`,
     `Recent themes to avoid repeating: ${snapshot.recentThemes.join(", ") || "none"}`,
+    `Recent Conversation Context:\n${formatRecentHistory(chatId)}`,
     `Plan snapshot: ${JSON.stringify(planSummary)}`,
     `Work snapshot: ${JSON.stringify({
       totalMinutes: snapshot.work.totalMinutes,
@@ -228,12 +240,13 @@ function buildHourlyPrompt(
 }
 
 async function generateHourlyMessage(
+  chatId: number,
   snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
   theme: HeartbeatTheme,
   tone: CoachToneMode,
 ): Promise<string> {
   const messages: ChatCompletionMessageParam[] = [
-    { role: "user", content: buildHourlyPrompt(snapshot, theme, tone) },
+    { role: "user", content: buildHourlyPrompt(chatId, snapshot, theme, tone) },
   ];
 
   const response = await chat(
@@ -250,6 +263,7 @@ export async function sendMorningCheckIn(chatId: number): Promise<void> {
   try {
     const text = buildMorningMessage(chatId);
     await sendHeartbeatMessage(chatId, text);
+    getHistory(chatId).push({ role: "assistant", content: text });
     recordHeartbeatEvent(chatId, "plan", "normal", text, "morning_checkin");
     console.log(`💓 Morning planning prompt sent to chat ${chatId}`);
   } catch (err) {
@@ -266,8 +280,9 @@ export async function sendHourlyCheckIn(chatId: number): Promise<void> {
       snapshot.profile.driftScore > 0.8;
     const tone = chooseHeartbeatToneFromProfile(snapshot.profile, lowMoodSignal);
     const { theme, reason } = chooseTheme(snapshot);
-    const text = await generateHourlyMessage(snapshot, theme, tone);
+    const text = await generateHourlyMessage(chatId, snapshot, theme, tone);
     await sendHeartbeatMessage(chatId, text);
+    getHistory(chatId).push({ role: "assistant", content: text });
     recordHeartbeatEvent(chatId, theme, tone, text, reason);
     console.log(`💓 Hourly heartbeat sent to chat ${chatId} [${theme}/${tone}]`);
   } catch (err) {
@@ -279,6 +294,7 @@ export async function sendEveningReview(chatId: number): Promise<void> {
   try {
     const text = await buildEveningMessage(chatId);
     await sendHeartbeatMessage(chatId, text);
+    getHistory(chatId).push({ role: "assistant", content: text });
     recordHeartbeatEvent(chatId, "reflection", "normal", text, "evening_review");
     console.log(`💓 Evening review sent to chat ${chatId}`);
   } catch (err) {
