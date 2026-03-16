@@ -48,7 +48,7 @@ export async function initSemanticMemory(): Promise<void> {
 /**
  * Generate an embedding vector for the given text using OpenAI.
  */
-async function embed(text: string): Promise<number[]> {
+export async function embed(text: string): Promise<number[]> {
   if (!openai) throw new Error("OpenAI client not initialized");
 
   const response = await openai.embeddings.create({

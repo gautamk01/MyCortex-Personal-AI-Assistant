@@ -58,17 +58,21 @@ export function queryGraph(chatId: number, entityName: string): string {
   const entity = getDb()
     .prepare("SELECT * FROM entities WHERE chatId = ? AND name = ?")
     .get(chatId, name) as
-    | { name: string; type: string; properties: string }
+    | { id: number; name: string; type: string; properties: string }
     | undefined;
 
   if (!entity) return `No entity found: "${entityName}"`;
 
+  // Track access
+  getDb().prepare("UPDATE entities SET accessCount = accessCount + 1, lastAccessed = datetime('now') WHERE id = ?").run(entity.id);
+
   // Get all relations from/to this entity
   const outgoing = getDb()
     .prepare(
-      "SELECT toEntity, relationType, properties FROM relations WHERE chatId = ? AND fromEntity = ?"
+      "SELECT id, toEntity, relationType, properties FROM relations WHERE chatId = ? AND fromEntity = ?"
     )
     .all(chatId, name) as Array<{
+    id: number;
     toEntity: string;
     relationType: string;
     properties: string;
@@ -76,13 +80,21 @@ export function queryGraph(chatId: number, entityName: string): string {
 
   const incoming = getDb()
     .prepare(
-      "SELECT fromEntity, relationType, properties FROM relations WHERE chatId = ? AND toEntity = ?"
+      "SELECT id, fromEntity, relationType, properties FROM relations WHERE chatId = ? AND toEntity = ?"
     )
     .all(chatId, name) as Array<{
+    id: number;
     fromEntity: string;
     relationType: string;
     properties: string;
   }>;
+
+  // Track relation access
+  const relationIds = [...outgoing.map(r => r.id), ...incoming.map(r => r.id)];
+  if (relationIds.length > 0) {
+    const placeholders = relationIds.map(() => "?").join(",");
+    getDb().prepare(`UPDATE relations SET accessCount = accessCount + 1, lastAccessed = datetime('now') WHERE id IN (${placeholders})`).run(...relationIds);
+  }
 
   const lines: string[] = [
     `Entity: ${entity.name} (${entity.type})`,
@@ -111,22 +123,36 @@ export function searchGraph(chatId: number, query: string): string {
 
   const entities = getDb()
     .prepare(
-      "SELECT name, type FROM entities WHERE chatId = ? AND (name LIKE ? OR type LIKE ? OR properties LIKE ?) LIMIT 15"
+      "SELECT id, name, type FROM entities WHERE chatId = ? AND (name LIKE ? OR type LIKE ? OR properties LIKE ?) LIMIT 15"
     )
     .all(chatId, pattern, pattern, pattern) as Array<{
+    id: number;
     name: string;
     type: string;
   }>;
 
   const relations = getDb()
     .prepare(
-      "SELECT fromEntity, toEntity, relationType FROM relations WHERE chatId = ? AND (fromEntity LIKE ? OR toEntity LIKE ? OR relationType LIKE ?) LIMIT 15"
+      "SELECT id, fromEntity, toEntity, relationType FROM relations WHERE chatId = ? AND (fromEntity LIKE ? OR toEntity LIKE ? OR relationType LIKE ?) LIMIT 15"
     )
     .all(chatId, pattern, pattern, pattern) as Array<{
+    id: number;
     fromEntity: string;
     toEntity: string;
     relationType: string;
   }>;
+
+  if (entities.length > 0) {
+    const entityIds = entities.map((e) => e.id);
+    const placeholders = entityIds.map(() => "?").join(",");
+    getDb().prepare(`UPDATE entities SET accessCount = accessCount + 1, lastAccessed = datetime('now') WHERE id IN (${placeholders})`).run(...entityIds);
+  }
+
+  if (relations.length > 0) {
+    const relationIds = relations.map((r) => r.id);
+    const placeholders = relationIds.map(() => "?").join(",");
+    getDb().prepare(`UPDATE relations SET accessCount = accessCount + 1, lastAccessed = datetime('now') WHERE id IN (${placeholders})`).run(...relationIds);
+  }
 
   const lines: string[] = [];
 

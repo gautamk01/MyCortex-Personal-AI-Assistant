@@ -1,4 +1,5 @@
 import { mkdirSync } from "node:fs";
+import cron from "node-cron";
 import { config } from "../config.js";
 import { registerTool } from "../tools/index.js";
 import {
@@ -12,7 +13,7 @@ import {
 import { getGraphContext, registerGraphTools } from "./knowledge-graph.js";
 import { getNotesContext, registerMarkdownTools } from "./markdown.js";
 import { getMediaContext, registerMultimodalTools } from "./multimodal.js";
-import { registerEvolutionTools } from "./evolution.js";
+import { registerEvolutionTools, runGlobalMaintenance } from "./evolution.js";
 import { getDailyPlanContext } from "../daily-plan.js";
 import { getCoachProfileContext, getRecentDailySummaryContext } from "../coach.js";
 import {
@@ -39,6 +40,11 @@ export async function initMemory(): Promise<void> {
   registerMultimodalTools();
   registerEvolutionTools();
   registerMarkdownTools();
+
+  // Schedule daily background maintenance at 3:00 AM
+  cron.schedule("0 3 * * *", () => {
+    runGlobalMaintenance();
+  });
 
   console.log("🧠 Memory system initialized");
 }

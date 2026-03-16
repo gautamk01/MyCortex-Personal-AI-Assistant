@@ -50,6 +50,9 @@ export function initDatabase(): void {
       name       TEXT NOT NULL,
       type       TEXT DEFAULT 'thing',
       properties TEXT DEFAULT '{}',
+      importance  REAL DEFAULT 1.0,
+      accessCount INTEGER DEFAULT 0,
+      lastAccessed TEXT DEFAULT (datetime('now')),
       createdAt  TEXT DEFAULT (datetime('now')),
       updatedAt  TEXT DEFAULT (datetime('now')),
       UNIQUE(chatId, name)
@@ -65,6 +68,9 @@ export function initDatabase(): void {
       toEntity     TEXT NOT NULL,
       relationType TEXT NOT NULL,
       properties   TEXT DEFAULT '{}',
+      importance  REAL DEFAULT 1.0,
+      accessCount INTEGER DEFAULT 0,
+      lastAccessed TEXT DEFAULT (datetime('now')),
       createdAt    TEXT DEFAULT (datetime('now')),
       UNIQUE(chatId, fromEntity, toEntity, relationType)
     )
