@@ -194,6 +194,13 @@ function quoteSheet(title: string): string {
   return `'${title.replace(/'/g, "''")}'`;
 }
 
+export function formatTime12Hour(hours: number, minutes: number): string {
+  const period = hours >= 12 ? "PM" : "AM";
+  let h = hours % 12;
+  if (h === 0) h = 12;
+  return `${pad2(h)}:${pad2(minutes)} ${period}`;
+}
+
 function getISTDateTime(): { date: string; time: string } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Kolkata",
@@ -215,24 +222,45 @@ function getISTDateTime(): { date: string; time: string } {
     throw new Error("Could not determine current IST date/time.");
   }
 
+  let parsedHour = parseInt(hour, 10);
+  if (parsedHour === 24) parsedHour = 0;
+
   return {
     date: `${year}-${month}-${day}`,
-    time: `${hour}:${minute}`,
+    time: formatTime12Hour(parsedHour, parseInt(minute, 10)),
   };
 }
 
 function parseTimeToMinutes(time: string): number {
   const normalized = time.trim();
-  if (!/^\d{2}:\d{2}$/.test(normalized)) {
-    throw new Error(`Time "${time}" must be in HH:MM 24-hour format.`);
+  
+  const match12 = normalized.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (match12) {
+    let hours = Number(match12[1]);
+    const minutes = Number(match12[2]);
+    const period = match12[3].toUpperCase();
+    
+    if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) {
+      throw new Error(`Time "${time}" is not a valid 12-hour time.`);
+    }
+    
+    if (period === "AM" && hours === 12) hours = 0;
+    else if (period === "PM" && hours !== 12) hours += 12;
+    
+    return hours * 60 + minutes;
+  }
+  
+  const match24 = normalized.match(/^(\d{1,2}):(\d{2})$/);
+  if (match24) {
+    const hours = Number(match24[1]);
+    const minutes = Number(match24[2]);
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      throw new Error(`Time "${time}" is not a valid 24-hour time.`);
+    }
+    return hours * 60 + minutes;
   }
 
-  const [hours, minutes] = normalized.split(":").map(Number);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-    throw new Error(`Time "${time}" is not a valid HH:MM 24-hour time.`);
-  }
-
-  return hours * 60 + minutes;
+  throw new Error(`Time "${time}" must be in HH:MM (24-hour) or hh:mm AM/PM format.`);
 }
 
 function pad2(value: number): string {
@@ -297,13 +325,18 @@ function calculateDurationMinutes(
   endDate: string,
   endTime: string,
 ): number {
-  const start = new Date(`${startDate}T${startTime}:00+05:30`);
-  const end = new Date(`${endDate}T${endTime}:00+05:30`);
-  const diffMs = end.getTime() - start.getTime();
-  if (diffMs < 0) {
+  const startMs = new Date(`${startDate}T00:00:00Z`).getTime();
+  const endMs = new Date(`${endDate}T00:00:00Z`).getTime();
+  const daysDiff = Math.round((endMs - startMs) / 86400000);
+  
+  const startMins = parseTimeToMinutes(startTime);
+  const endMins = parseTimeToMinutes(endTime);
+  
+  const diffMins = (daysDiff * 1440) + endMins - startMins;
+  if (diffMins < 0) {
     throw new Error("End time must be after start time.");
   }
-  return Math.round(diffMs / 60000);
+  return diffMins;
 }
 
 function resolveLifeTiming(input: {
@@ -380,7 +413,7 @@ function resolveLifeTiming(input: {
       startDate,
       startTime,
       endDate,
-      endTime: `${pad2(Math.floor(endMins / 60))}:${pad2(endMins % 60)}`,
+      endTime: formatTime12Hour(Math.floor(endMins / 60), endMins % 60),
       durationMinutes,
       entryType: "session",
     };

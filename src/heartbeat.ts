@@ -39,12 +39,21 @@ function getISTDateTime(date = new Date()): { date: string; time: string; hour: 
   const month = parts.find((part) => part.type === "month")?.value ?? "00";
   const day = parts.find((part) => part.type === "day")?.value ?? "00";
   const hour = Number(parts.find((part) => part.type === "hour")?.value ?? "0");
-  const minute = parts.find((part) => part.type === "minute")?.value ?? "00";
+  const minute = Number(parts.find((part) => part.type === "minute")?.value ?? "00");
+
+  let parsedHour = hour;
+  if (parsedHour === 24) parsedHour = 0;
+
+  const period = parsedHour >= 12 ? "PM" : "AM";
+  let h12 = parsedHour % 12;
+  if (h12 === 0) h12 = 12;
+
+  const timeStr = `${String(h12).padStart(2, "0")}:${String(minute).padStart(2, "0")} ${period}`;
 
   return {
     date: `${year}-${month}-${day}`,
-    time: `${String(hour).padStart(2, "0")}:${minute}`,
-    hour,
+    time: timeStr,
+    hour: parsedHour,
   };
 }
 
