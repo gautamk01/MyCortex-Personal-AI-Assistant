@@ -1,6 +1,6 @@
 import { chat, type ChatCompletionMessageParam } from "./llm.js";
 import { getDailyPlan, getDailyPlanStats, type DailyPlan } from "./daily-plan.js";
-import { summarizeLifeLogs, summarizeWorkLogs } from "./sheets.js";
+import { summarizeLifeLogs, summarizeWorkLogs } from "./memory/local-logs.js";
 import { getDb, getUserStats } from "./memory/sqlite.js";
 
 export type CoachToneMode = "normal" | "warm_firm" | "supportive" | "strict";
@@ -331,8 +331,8 @@ export async function collectDailySummaryMetrics(
 ): Promise<DailySummaryMetrics> {
   const plan = getDailyPlan(chatId, date);
   const [work, life] = await Promise.all([
-    summarizeWorkLogs(date, date),
-    summarizeLifeLogs(date, date),
+    summarizeWorkLogs(chatId, date, date),
+    summarizeLifeLogs(chatId, date, date),
   ]);
 
   let planMetrics: DailySummaryMetrics["plan"] = {
@@ -672,8 +672,8 @@ export async function buildHourlySnapshot(chatId: number): Promise<{
   const { listReminders } = await import("./reminders.js");
   const profile = getCoachProfile(chatId);
   const [work, life] = await Promise.all([
-    summarizeWorkLogs(now.date, now.date),
-    summarizeLifeLogs(now.date, now.date),
+    summarizeWorkLogs(chatId, now.date, now.date),
+    summarizeLifeLogs(chatId, now.date, now.date),
   ]);
   return {
     date: now.date,

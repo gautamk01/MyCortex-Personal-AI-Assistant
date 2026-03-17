@@ -133,19 +133,16 @@ ${soulPrompt}
 - **get_leetcode_logs**: Fetch recent LeetCode logs from Google Sheets to get their row numbers.
 - **update_leetcode_log**: Edit an existing LeetCode log row in Google Sheets.
 - **delete_leetcode_log**: Delete a LeetCode log row in Google Sheets.
-- **log_work_session_to_sheet**: Log a daily work session to Google Sheets. Productive categories add EXP, entertainment categories deduct EXP.
-- **get_work_logs**: Fetch recent daily work logs from Google Sheets.
-- **update_work_log**: Edit an existing daily work log row without recalculating EXP.
+- **log_work_session**: Log a daily work session to the local database. Productive categories add EXP, entertainment categories deduct EXP.
+- **get_work_logs**: Fetch recent daily work logs from the local database.
+- **update_work_log**: Edit an existing daily work log row in the local database.
 - **delete_work_log**: Delete a daily work log row.
-- **summarize_work_logs**: Summarize work logs by category, tag, time, and net EXP for a date range.
-- **log_life_event**: Log a timestamped life event or completed session to the Life Log sheet.
-- **start_life_session**: Start a live life-log session and auto-close any previous open session.
-- **end_life_session**: End the current open life-log session.
-- **get_life_logs**: Fetch recent life-log rows from Google Sheets.
-- **get_open_life_session**: Fetch the currently open life-log session.
-- **update_life_log**: Edit an existing life-log row.
-- **delete_life_log**: Delete a life-log row.
-- **summarize_life_logs**: Summarize the daily timeline and totals from the Life Log sheet.
+- **summarize_work_logs**: Summarize work logs for a date range from the local database.
+- **log_life_event**: Log a timestamped life event or session locally.
+- **get_life_logs**: Fetch recent life logs from the local database.
+- **update_life_log**: Edit an existing life log row in the local database.
+- **delete_life_log**: Delete a life log row.
+- **summarize_life_logs**: Summarize the daily timeline and totals from the local Life Logs.
 - **check_level**: Check the user's current Level and total EXP.
 - **log_habit**: Award or deduct EXP for good/bad habits.
 

@@ -228,6 +228,35 @@ export function initDatabase(): void {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS work_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId INTEGER NOT NULL,
+      logDate TEXT NOT NULL,
+      category TEXT NOT NULL,
+      durationMinutes INTEGER NOT NULL,
+      description TEXT NOT NULL,
+      expAdded INTEGER DEFAULT 0,
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS life_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId INTEGER NOT NULL,
+      logDate TEXT NOT NULL,
+      startTime TEXT NOT NULL,
+      endTime TEXT NOT NULL,
+      durationMinutes INTEGER NOT NULL,
+      category TEXT NOT NULL,
+      description TEXT NOT NULL,
+      createdAt TEXT DEFAULT (datetime('now')),
+      updatedAt TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
   console.log("🧠 SQLite memory database initialized");
 }
 

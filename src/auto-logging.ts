@@ -1,4 +1,5 @@
-import { logLeetCodeToSheet, logWorkSessionToSheet, logLifeEventToSheet } from "./sheets.js";
+import { logLeetCodeToSheet, getISTDateTime } from "./sheets.js";
+import { logLifeEvent, logWorkSession } from "./memory/local-logs.js";
 
 function normalizeClockTime(input: string): string | null {
   const trimmed = input.trim().toLowerCase();
@@ -27,17 +28,20 @@ function compactTag(tag: string): string {
 
 export async function attemptAutoLog(chatId: number, userMessage: string): Promise<string | null> {
   const text = userMessage.trim();
+  const { date, time } = getISTDateTime();
 
   const wakeMatch = text.match(/\b(?:i\s+)?woke up at\s+([0-9: ]+(?:am|pm)?)/i);
   if (wakeMatch) {
     const startTime = normalizeClockTime(wakeMatch[1]);
     if (startTime) {
-      await logLifeEventToSheet({
-        activity: "Woke up",
-        category: "sleep",
-        entryType: "point",
-        source: "manual",
+      await logLifeEvent({
+        chatId,
+        logDate: date,
         startTime,
+        endTime: startTime,
+        durationMinutes: 0,
+        category: "sleep",
+        description: "Woke up",
       });
       return `Auto-logged in Life Log: woke up at ${startTime}.`;
     }
@@ -98,11 +102,12 @@ export async function attemptAutoLog(chatId: number, userMessage: string): Promi
 
     const tag = compactTag(match[1]);
     const timeMinutes = Number(match[2]);
-    await logWorkSessionToSheet(
-      pattern.title(tag),
+    await logWorkSession(
+      chatId,
+      date,
       pattern.category,
-      tag,
       timeMinutes,
+      pattern.title(tag)
     );
     return `Auto-logged in Daily Work Log: ${pattern.title(tag)} for ${timeMinutes} mins.`;
   }

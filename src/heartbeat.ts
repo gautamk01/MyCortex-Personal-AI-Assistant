@@ -188,16 +188,16 @@ export function buildContextCandidates(
 
   const lastWorkLog = [...snapshot.work.logs]
     .reverse()
-    .find((log) => log.workTitle || log.tag || log.category);
+    .find((log) => log.description || log.category);
   if (lastWorkLog) {
-    const workSubject = lastWorkLog.workTitle || lastWorkLog.tag || lastWorkLog.category;
+    const workSubject = lastWorkLog.description || lastWorkLog.category;
     pushCandidate(
       "work_log",
       workSubject,
       65,
       "work_log",
       "latest_work_log",
-      `Your last logged work was ${workSubject}${lastWorkLog.time ? ` at ${lastWorkLog.time}` : ""}.`,
+      `Your last logged work was ${workSubject}.`,
     );
   }
 
