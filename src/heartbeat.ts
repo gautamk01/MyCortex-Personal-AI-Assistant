@@ -9,11 +9,14 @@ import {
   collectDailySummaryMetrics,
   generateDailySummaryText,
   getCoachProfile,
+  markHeartbeatContextAsked,
   getRecentHeartbeatThemes,
   recordHeartbeatEvent,
   storeDailySummary,
   type CoachToneMode,
+  type HeartbeatContextSource,
   type HeartbeatTheme,
+  upsertHeartbeatContext,
 } from "./coach.js";
 import {
   formatDailyPlan,
@@ -70,6 +73,149 @@ function formatRecentHistory(chatId: number): string {
   return recent
     .map((msg) => `${msg.role}: ${typeof msg.content === "string" ? msg.content.substring(0, 100) : "..."}`)
     .join("\n");
+}
+
+export interface HeartbeatContextCandidate {
+  contextKey: string;
+  subject: string;
+  sourceType: HeartbeatContextSource;
+  priority: number;
+  askCount: number;
+  theme: HeartbeatTheme;
+  reason: string;
+  observation: string;
+}
+
+function normalizeContextKey(subject: string): string {
+  return subject
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+function getCandidateAskCount(
+  snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
+  contextKey: string,
+): number {
+  const existing = snapshot.contexts.find((context) => context.contextKey === contextKey);
+  return existing?.askCount ?? 0;
+}
+
+function isTodayTimestamp(snapshotDate: string, value?: string | null): boolean {
+  return Boolean(value && value.startsWith(snapshotDate));
+}
+
+export function buildContextCandidates(
+  snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
+): HeartbeatContextCandidate[] {
+  const candidates: HeartbeatContextCandidate[] = [];
+  const seen = new Set<string>();
+
+  const pushCandidate = (
+    sourceType: HeartbeatContextSource,
+    subject: string,
+    priority: number,
+    theme: HeartbeatTheme,
+    reason: string,
+    observation: string,
+  ) => {
+    const contextKey = normalizeContextKey(subject);
+    if (!contextKey || seen.has(`${sourceType}:${contextKey}`)) return;
+    seen.add(`${sourceType}:${contextKey}`);
+    candidates.push({
+      contextKey,
+      subject: subject.trim(),
+      sourceType,
+      priority,
+      askCount: getCandidateAskCount(snapshot, contextKey),
+      theme,
+      reason,
+      observation,
+    });
+  };
+
+  if (snapshot.life.openSession?.activity) {
+    pushCandidate(
+      "life_log",
+      snapshot.life.openSession.activity,
+      100,
+      "focus",
+      "open_life_session",
+      `You have ${snapshot.life.openSession.activity} open since ${snapshot.life.openSession.startTime}.`,
+    );
+  }
+
+  for (const context of snapshot.contexts.filter((item) => item.sourceType === "conversation")) {
+    const priority = isTodayTimestamp(snapshot.date, context.updatedAt) ? 90 : 55;
+    pushCandidate(
+      context.sourceType,
+      context.subject,
+      priority,
+      "focus",
+      isTodayTimestamp(snapshot.date, context.updatedAt) ? "today_conversation_context" : "recent_conversation_context",
+      `Earlier you were on ${context.subject}.`,
+    );
+  }
+
+  const inProgressItems = snapshot.plan?.items.filter((item) => item.status === "in_progress") ?? [];
+  for (const item of inProgressItems) {
+    pushCandidate(
+      "plan",
+      item.title,
+      85,
+      "focus",
+      "plan_in_progress",
+      `${item.title} is marked in progress on today's plan.`,
+    );
+  }
+
+  const openMusts = (snapshot.plan?.items ?? []).filter(
+    (item) => item.priority === "must" && item.status !== "done" && item.status !== "skipped",
+  );
+  for (const item of openMusts.slice(0, 2)) {
+    pushCandidate(
+      "plan",
+      item.title,
+      75,
+      "plan",
+      "open_must_do",
+      `${item.title} is still open on today's must-do list.`,
+    );
+  }
+
+  const lastWorkLog = [...snapshot.work.logs]
+    .reverse()
+    .find((log) => log.workTitle || log.tag || log.category);
+  if (lastWorkLog) {
+    const workSubject = lastWorkLog.workTitle || lastWorkLog.tag || lastWorkLog.category;
+    pushCandidate(
+      "work_log",
+      workSubject,
+      65,
+      "work_log",
+      "latest_work_log",
+      `Your last logged work was ${workSubject}${lastWorkLog.time ? ` at ${lastWorkLog.time}` : ""}.`,
+    );
+  }
+
+  return candidates.sort((a, b) => b.priority - a.priority || a.askCount - b.askCount);
+}
+
+export function chooseContextCandidate(
+  snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
+): HeartbeatContextCandidate | null {
+  const candidates = buildContextCandidates(snapshot);
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0];
+
+  const [best, second] = candidates;
+  if (best.askCount > 0 && second.priority >= best.priority - 8) {
+    return second;
+  }
+  return best;
 }
 
 function buildMorningMessage(chatId: number): string {
@@ -194,7 +340,7 @@ function buildToneInstruction(tone: CoachToneMode): string {
   }
 }
 
-function buildHourlyPrompt(
+function buildFallbackHourlyPrompt(
   chatId: number,
   snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
   theme: HeartbeatTheme,
@@ -217,12 +363,17 @@ function buildHourlyPrompt(
     "Return only 1 to 3 short lines.",
     "No fluff. No essay. No generic motivation.",
     "Mention one concrete observation and one direct question or instruction.",
-    "CRITICAL: If the user is currently in an open session or recently logged a task (check the Life snapshot 'openSession' and Work snapshot 'lastLog'), you MUST ask specifically about that task (e.g., 'How is the [task] going?'). Otherwise, if Recent Conversation Context indicates they were doing something, follow up on it. ONLY ask a generic 'What are you doing right now?' if there is no recent context or logs.",
+    "Only ask a generic 'What are you doing right now?' if there is no concrete task, plan item, or recent context.",
     "",
     `Theme: ${theme}`,
     `Date: ${snapshot.date}`,
     `Recent themes to avoid repeating: ${snapshot.recentThemes.join(", ") || "none"}`,
     `Recent Conversation Context:\n${formatRecentHistory(chatId)}`,
+    `Active conversation contexts: ${JSON.stringify(snapshot.contexts.map((context) => ({
+      subject: context.subject,
+      updatedAt: context.updatedAt,
+      askCount: context.askCount,
+    })))} `,
     `Plan snapshot: ${JSON.stringify(planSummary)}`,
     `Work snapshot: ${JSON.stringify({
       totalMinutes: snapshot.work.totalMinutes,
@@ -250,14 +401,59 @@ function buildHourlyPrompt(
   ].join("\n");
 }
 
-async function generateHourlyMessage(
+function buildQuestionForStage(
+  stage: number,
+  tone: CoachToneMode,
+  subject: string,
+): string {
+  const quotedSubject = `"${subject}"`;
+
+  if (stage <= 0) {
+    if (tone === "supportive") return `How is ${quotedSubject} going?`;
+    return `How is ${quotedSubject} going?`;
+  }
+
+  if (stage === 1) {
+    if (tone === "supportive") return `Did you get through ${quotedSubject}?`;
+    if (tone === "strict") return `Did you finish ${quotedSubject}?`;
+    return `Did you finish ${quotedSubject}?`;
+  }
+
+  if (tone === "supportive") return `What is still blocking ${quotedSubject}?`;
+  if (tone === "strict") return `What is still blocking ${quotedSubject}?`;
+  return `What's still blocking ${quotedSubject}?`;
+}
+
+export function buildContextDrivenMessage(
+  candidate: HeartbeatContextCandidate,
+  tone: CoachToneMode,
+): string {
+  const observation = candidate.observation;
+  const question = buildQuestionForStage(candidate.askCount, tone, candidate.subject);
+
+  if (tone === "supportive") {
+    return `${observation}\n${question}`;
+  }
+
+  if (tone === "strict" && candidate.askCount >= 2) {
+    return `${observation}\n${question} Answer plainly.`;
+  }
+
+  if (tone === "warm_firm" && candidate.askCount >= 1) {
+    return `${observation}\n${question} Keep it concrete.`;
+  }
+
+  return `${observation}\n${question}`;
+}
+
+async function generateFallbackHourlyMessage(
   chatId: number,
   snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
   theme: HeartbeatTheme,
   tone: CoachToneMode,
 ): Promise<string> {
   const messages: ChatCompletionMessageParam[] = [
-    { role: "user", content: buildHourlyPrompt(chatId, snapshot, theme, tone) },
+    { role: "user", content: buildFallbackHourlyPrompt(chatId, snapshot, theme, tone) },
   ];
 
   const response = await chat(
@@ -290,8 +486,25 @@ export async function sendHourlyCheckIn(chatId: number): Promise<void> {
       snapshot.life.entertainmentMinutes > snapshot.life.focusedMinutes &&
       snapshot.profile.driftScore > 0.8;
     const tone = chooseHeartbeatToneFromProfile(snapshot.profile, lowMoodSignal);
-    const { theme, reason } = chooseTheme(snapshot);
-    const text = await generateHourlyMessage(chatId, snapshot, theme, tone);
+    const selectedCandidate = chooseContextCandidate(snapshot);
+    const fallbackTheme = chooseTheme(snapshot);
+    const theme = selectedCandidate?.theme ?? fallbackTheme.theme;
+    const reason = selectedCandidate?.reason ?? fallbackTheme.reason;
+    const text = selectedCandidate
+      ? buildContextDrivenMessage(selectedCandidate, tone)
+      : await generateFallbackHourlyMessage(chatId, snapshot, theme, tone);
+
+    if (selectedCandidate) {
+      upsertHeartbeatContext(
+        chatId,
+        selectedCandidate.sourceType,
+        selectedCandidate.subject,
+        "active",
+        { reason: selectedCandidate.reason, observation: selectedCandidate.observation },
+      );
+      markHeartbeatContextAsked(chatId, selectedCandidate.contextKey);
+    }
+
     await sendHeartbeatMessage(chatId, text);
     getHistory(chatId).push({ role: "assistant", content: text });
     recordHeartbeatEvent(chatId, theme, tone, text, reason);

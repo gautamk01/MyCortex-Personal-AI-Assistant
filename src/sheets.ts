@@ -857,9 +857,13 @@ export async function summarizeWorkLogs(
     .slice(1)
     .map((row) => ({
       date: row[1],
+      time: row[2] ?? "",
+      workTitle: row[3] ?? "",
       category: row[4],
       tag: row[5] ?? "",
       timeMinutes: Number(row[6] ?? 0),
+      output: row[7] ?? "",
+      notes: row[8] ?? "",
       exp: Number(row[9] ?? 0),
     }))
     .filter((row) => row.date >= start && row.date <= end);

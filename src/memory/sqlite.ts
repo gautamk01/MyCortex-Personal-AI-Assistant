@@ -209,6 +209,25 @@ export function initDatabase(): void {
     )
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS heartbeat_contexts (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      chatId        INTEGER NOT NULL,
+      contextKey    TEXT NOT NULL,
+      sourceType    TEXT NOT NULL,
+      subject       TEXT NOT NULL,
+      status        TEXT DEFAULT 'active',
+      evidenceJson  TEXT DEFAULT '{}',
+      firstSeenAt   TEXT DEFAULT (datetime('now')),
+      lastSeenAt    TEXT DEFAULT (datetime('now')),
+      lastAskedAt   TEXT DEFAULT '',
+      askCount      INTEGER DEFAULT 0,
+      createdAt     TEXT DEFAULT (datetime('now')),
+      updatedAt     TEXT DEFAULT (datetime('now')),
+      UNIQUE(chatId, contextKey, sourceType)
+    )
+  `);
+
   console.log("🧠 SQLite memory database initialized");
 }
 

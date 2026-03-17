@@ -2,6 +2,7 @@ import { getDb } from "./sqlite.js";
 import { config } from "../config.js";
 import { registerTool } from "../tools/index.js";
 import { embed, isSemanticMemoryEnabled } from "./semantic-memory.js";
+import { cleanupOldHeartbeatContexts } from "../coach.js";
 
 // ── Access Tracking ────────────────────────────────────────────
 
@@ -235,6 +236,7 @@ export function getMemoryStats(chatId: number): string {
 export async function runMaintenance(chatId: number): Promise<string> {
   const results: string[] = [];
   results.push(decayMemories());
+  results.push(`Removed ${cleanupOldHeartbeatContexts(2)} heartbeat contexts older than 2 days.`);
   results.push(await mergeDuplicates(chatId));
   return `🔧 Memory Maintenance Complete\n${results.join("\n")}`;
 }
@@ -244,6 +246,7 @@ export async function runGlobalMaintenance(): Promise<void> {
   try {
     const results: string[] = [];
     results.push(decayMemories());
+    results.push(`Removed ${cleanupOldHeartbeatContexts(2)} heartbeat contexts older than 2 days.`);
 
     const users = getDb().prepare("SELECT DISTINCT chatId FROM facts").all() as Array<{ chatId: number }>;
     for (const { chatId } of users) {

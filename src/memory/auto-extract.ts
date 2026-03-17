@@ -2,6 +2,7 @@ import { config } from "../config.js";
 import { chat, type ChatCompletionMessageParam } from "../llm.js";
 import { storeFact } from "./sqlite.js";
 import { addEntity, addRelation } from "./knowledge-graph.js";
+import { setHeartbeatContextStatus, upsertHeartbeatContext } from "../coach.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -16,6 +17,12 @@ interface ExtractedData {
     from: string;
     to: string;
     relation: string;
+  }>;
+  heartbeatContexts: Array<{
+    subject: string;
+    status: "active" | "done" | "stale";
+    source: "conversation";
+    reason: string;
   }>;
 }
 
@@ -32,11 +39,17 @@ Return a JSON object with these fields:
   - type: one of "person", "place", "project", "tool", "concept", "organization", "thing"
 - "relations": Array of {from, to, relation} — connections between entities.
   - relation: descriptive verb like "works_on", "uses", "knows", "prefers", "lives_in"
+- "heartbeatContexts": Array of {subject, status, source, reason}
+  - source: always "conversation"
+  - status: "active" when the user is still working on / planning / worried about it soon, "done" when they clearly finished it, "stale" when they clearly switched away from it
+  - subject: a short natural phrase like "resume edits", "DBMS revision", "calling the recruiter"
+  - Only include topics that are worth asking about in the next few hours or later today
 
 Rules:
 - Only extract NEW, meaningful information. Skip greetings, filler, and obvious context.
 - If nothing meaningful is found, return empty arrays.
 - Keep values concise but complete.
+- For heartbeat contexts, prefer current work, promised next actions, blockers, or things the user says they still need to finish.
 - Do NOT invent information not present in the conversation.
 
 Respond with ONLY valid JSON, no other text.`;
@@ -120,15 +133,37 @@ export async function autoExtract(
       }
     }
 
+    if (extracted.heartbeatContexts && Array.isArray(extracted.heartbeatContexts)) {
+      for (const context of extracted.heartbeatContexts) {
+        if (!context.subject || typeof context.subject !== "string") continue;
+        const status = context.status === "done" || context.status === "stale"
+          ? context.status
+          : "active";
+
+        if (status === "active") {
+          upsertHeartbeatContext(
+            chatId,
+            "conversation",
+            context.subject,
+            "active",
+            { reason: context.reason || "conversation", source: "conversation" },
+          );
+        } else {
+          setHeartbeatContextStatus(chatId, context.subject, status);
+        }
+      }
+    }
+
     const counts = {
       facts: extracted.facts?.length || 0,
       entities: extracted.entities?.length || 0,
       relations: extracted.relations?.length || 0,
+      heartbeatContexts: extracted.heartbeatContexts?.length || 0,
     };
 
-    if (counts.facts + counts.entities + counts.relations > 0) {
+    if (counts.facts + counts.entities + counts.relations + counts.heartbeatContexts > 0) {
       console.log(
-        `🧠 Auto-extracted: ${counts.facts} facts, ${counts.entities} entities, ${counts.relations} relations`
+        `🧠 Auto-extracted: ${counts.facts} facts, ${counts.entities} entities, ${counts.relations} relations, ${counts.heartbeatContexts} heartbeat contexts`
       );
     }
   } catch (err) {

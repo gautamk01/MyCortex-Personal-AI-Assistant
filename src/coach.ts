@@ -47,6 +47,31 @@ export interface ReminderSnapshot {
   status: "scheduled" | "done" | "cancelled";
 }
 
+export type HeartbeatContextSource =
+  | "conversation"
+  | "plan"
+  | "work_log"
+  | "life_log"
+  | "summary";
+
+export type HeartbeatContextStatus = "active" | "done" | "stale";
+
+export interface HeartbeatContextRecord {
+  id: number;
+  chatId: number;
+  contextKey: string;
+  sourceType: HeartbeatContextSource;
+  subject: string;
+  status: HeartbeatContextStatus;
+  evidenceJson: string;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  lastAskedAt: string;
+  askCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DailySummaryMetrics {
   plan: {
     exists: boolean;
@@ -506,6 +531,133 @@ export function chooseHeartbeatTone(chatId: number, lowMoodSignal = false): Coac
   return chooseHeartbeatToneFromProfile(getCoachProfile(chatId), lowMoodSignal);
 }
 
+function normalizeHeartbeatContextKey(subject: string): string {
+  return subject
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+function getHeartbeatContextCutoff(days = 2): string {
+  const now = new Date();
+  now.setUTCDate(now.getUTCDate() - days);
+  return now.toISOString().slice(0, 19).replace("T", " ");
+}
+
+export function cleanupOldHeartbeatContexts(days = 2): number {
+  const result = getDb()
+    .prepare(`
+      DELETE FROM heartbeat_contexts
+      WHERE updatedAt < ?
+    `)
+    .run(getHeartbeatContextCutoff(days));
+
+  return result.changes;
+}
+
+export function upsertHeartbeatContext(
+  chatId: number,
+  sourceType: HeartbeatContextSource,
+  subject: string,
+  status: HeartbeatContextStatus = "active",
+  evidence: Record<string, unknown> = {},
+): void {
+  const trimmedSubject = subject.trim();
+  if (!trimmedSubject) return;
+
+  const contextKey = normalizeHeartbeatContextKey(trimmedSubject);
+  if (!contextKey) return;
+
+  const existing = getDb()
+    .prepare(`
+      SELECT id, askCount, firstSeenAt
+      FROM heartbeat_contexts
+      WHERE chatId = ? AND contextKey = ? AND sourceType = ?
+    `)
+    .get(chatId, contextKey, sourceType) as
+    | { id: number; askCount: number; firstSeenAt: string }
+    | undefined;
+
+  if (existing) {
+    getDb()
+      .prepare(`
+        UPDATE heartbeat_contexts
+        SET subject = ?,
+            status = ?,
+            evidenceJson = ?,
+            lastSeenAt = datetime('now'),
+            updatedAt = datetime('now')
+        WHERE id = ?
+      `)
+      .run(trimmedSubject, status, JSON.stringify(evidence), existing.id);
+    return;
+  }
+
+  getDb()
+    .prepare(`
+      INSERT INTO heartbeat_contexts (
+        chatId, contextKey, sourceType, subject, status, evidenceJson
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    .run(chatId, contextKey, sourceType, trimmedSubject, status, JSON.stringify(evidence));
+}
+
+export function setHeartbeatContextStatus(
+  chatId: number,
+  subject: string,
+  status: HeartbeatContextStatus,
+): void {
+  const contextKey = normalizeHeartbeatContextKey(subject);
+  if (!contextKey) return;
+
+  getDb()
+    .prepare(`
+      UPDATE heartbeat_contexts
+      SET status = ?,
+          updatedAt = datetime('now')
+      WHERE chatId = ? AND contextKey = ?
+    `)
+    .run(status, chatId, contextKey);
+}
+
+export function listActiveHeartbeatContexts(chatId: number, limit = 5): HeartbeatContextRecord[] {
+  return getDb()
+    .prepare(`
+      SELECT id, chatId, contextKey, sourceType, subject, status, evidenceJson,
+             firstSeenAt, lastSeenAt, lastAskedAt, askCount, createdAt, updatedAt
+      FROM heartbeat_contexts
+      WHERE chatId = ?
+        AND status = 'active'
+        AND updatedAt >= ?
+      ORDER BY
+        CASE sourceType
+          WHEN 'conversation' THEN 1
+          WHEN 'life_log' THEN 2
+          WHEN 'plan' THEN 3
+          WHEN 'work_log' THEN 4
+          ELSE 5
+        END,
+        updatedAt DESC
+      LIMIT ?
+    `)
+    .all(chatId, getHeartbeatContextCutoff(), limit) as HeartbeatContextRecord[];
+}
+
+export function markHeartbeatContextAsked(chatId: number, contextKey: string): void {
+  getDb()
+    .prepare(`
+      UPDATE heartbeat_contexts
+      SET lastAskedAt = datetime('now'),
+          askCount = askCount + 1,
+          updatedAt = datetime('now')
+      WHERE chatId = ? AND contextKey = ?
+    `)
+    .run(chatId, contextKey);
+}
+
 export async function buildHourlySnapshot(chatId: number): Promise<{
   date: string;
   profile: CoachProfile;
@@ -514,6 +666,7 @@ export async function buildHourlySnapshot(chatId: number): Promise<{
   life: Awaited<ReturnType<typeof summarizeLifeLogs>>;
   reminders: ReminderSnapshot[];
   recentThemes: string[];
+  contexts: HeartbeatContextRecord[];
 }> {
   const now = getISTDateTime();
   const { listReminders } = await import("./reminders.js");
@@ -530,5 +683,6 @@ export async function buildHourlySnapshot(chatId: number): Promise<{
     life,
     reminders: listReminders(chatId),
     recentThemes: getRecentHeartbeatThemes(chatId, 3),
+    contexts: listActiveHeartbeatContexts(chatId, 5),
   };
 }
