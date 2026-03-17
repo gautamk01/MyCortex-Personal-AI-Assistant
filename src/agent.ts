@@ -46,6 +46,7 @@ export async function runAgentLoop(
   userMessage: string,
   interfaceMode: "gui" | "terminal" = "terminal",
   progress?: AgentProgressReporter,
+  messageId?: number,
 ): Promise<string> {
   const history = getHistory(chatId);
   const tools = getToolDefinitions();
@@ -119,7 +120,7 @@ export async function runAgentLoop(
     // If model wants to use tools, execute them
     if (choice.finish_reason === "tool_calls" || message.tool_calls.length > 0) {
       await progress?.update("using_tools");
-      const toolResults = await executeToolCalls(chatId, message.tool_calls);
+      const toolResults = await executeToolCalls(chatId, message.tool_calls, messageId);
 
       // Append each tool result to history
       for (const result of toolResults) {
@@ -148,6 +149,7 @@ export async function runAgentLoop(
 async function executeToolCalls(
   chatId: number,
   toolCalls: ChatCompletionToolCall[],
+  messageId?: number,
 ): Promise<ChatCompletionMessageParam[]> {
   const results: ChatCompletionMessageParam[] = [];
 
@@ -163,7 +165,7 @@ async function executeToolCalls(
 
     try {
       console.log(`🔧 Tool call: ${funcName}(${JSON.stringify(funcArgs)})`);
-      const result = await executeTool(funcName, { ...funcArgs, __chatId: chatId });
+      const result = await executeTool(funcName, { ...funcArgs, __chatId: chatId, __messageId: messageId });
       console.log(`✅ Tool result: ${result.slice(0, 200)}`);
 
       results.push({

@@ -196,7 +196,7 @@ bot.command("plan", async (ctx) => {
     const instruction = prompt
       ? `Create or rebuild my plan for today using these constraints: ${prompt}. Use the daily plan tools, keep it to at most 3 must-do items, and sync it to Todoist when the plan is final.`
       : "Help me create my plan for today. If critical details are missing, ask a concise follow-up. Once you have enough information, create the plan with daily plan tools and sync it to Todoist.";
-    const response = await runAgentLoop(chatId, instruction, interfaceMode, progress.reporter);
+    const response = await runAgentLoop(chatId, instruction, interfaceMode, progress.reporter, ctx.message?.message_id);
     await replyText(ctx, response);
   } catch (error) {
     console.error("❌ Plan command error:", error);
@@ -344,7 +344,7 @@ bot.on("message:text", async (ctx) => {
   );
 
   try {
-    const response = await runAgentLoop(chatId, userMessage, interfaceMode, progress.reporter);
+    const response = await runAgentLoop(chatId, userMessage, interfaceMode, progress.reporter, ctx.message.message_id);
 
     if (mode === "text") {
       // ── Text mode: send text only ──
@@ -482,7 +482,7 @@ async function handleSpeechMessage(ctx: Context): Promise<void> {
     await replyText(ctx, `🎙️ <b>What you said:</b> "${transcript}"`);
 
     // 4. Run the transcript through the AI Agent loop
-    const response = await runAgentLoop(chatId, transcript, interfaceMode, progress.reporter);
+    const response = await runAgentLoop(chatId, transcript, interfaceMode, progress.reporter, ctx.message?.message_id);
 
     // 5. Reply (respecting text/voice mode preference)
     if (mode === "text") {
