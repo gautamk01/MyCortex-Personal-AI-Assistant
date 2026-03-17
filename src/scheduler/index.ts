@@ -30,13 +30,27 @@ export function setSchedulerCallback(cb: TaskCallback): void {
   onTaskFire = cb;
 }
 
-// ── Shutdown ───────────────────────────────────────────────────
+// ── Shutdown & Global Controls ───────────────────────────────────
 
 export function stopAllTasks(): void {
   for (const t of tasks.values()) {
     t.task.stop();
   }
   tasks.clear();
+}
+
+export function pauseAllTasks(): void {
+  for (const t of tasks.values()) {
+    t.task.stop();
+  }
+}
+
+export function resumeAllTasks(): void {
+  for (const t of tasks.values()) {
+    if (!t.paused) {
+      t.task.start();
+    }
+  }
 }
 
 // ── Tools ──────────────────────────────────────────────────────
