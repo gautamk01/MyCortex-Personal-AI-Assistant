@@ -217,7 +217,7 @@ function buildHourlyPrompt(
     "Return only 1 to 3 short lines.",
     "No fluff. No essay. No generic motivation.",
     "Mention one concrete observation and one direct question or instruction.",
-    "If the user was previously working on a task based on the Recent Conversation Context, ask how it is going or if it is done. Otherwise, ask what they are doing right now so it can be logged.",
+    "CRITICAL: If the user is currently in an open session or recently logged a task (check the Life snapshot 'openSession' and Work snapshot 'lastLog'), you MUST ask specifically about that task (e.g., 'How is the [task] going?'). Otherwise, if Recent Conversation Context indicates they were doing something, follow up on it. ONLY ask a generic 'What are you doing right now?' if there is no recent context or logs.",
     "",
     `Theme: ${theme}`,
     `Date: ${snapshot.date}`,
@@ -227,6 +227,7 @@ function buildHourlyPrompt(
     `Work snapshot: ${JSON.stringify({
       totalMinutes: snapshot.work.totalMinutes,
       totalsByCategory: snapshot.work.totalsByCategory,
+      lastLog: snapshot.work.logs.length > 0 ? snapshot.work.logs[snapshot.work.logs.length - 1] : null,
     })}`,
     `Life snapshot: ${JSON.stringify({
       totalMinutes: snapshot.life.totalMinutes,
@@ -235,6 +236,7 @@ function buildHourlyPrompt(
       entertainmentMinutes: snapshot.life.entertainmentMinutes,
       wakeUpTime: snapshot.life.wakeUpTime,
       timelineCount: snapshot.life.timeline.length,
+      openSession: snapshot.life.openSession ? { activity: snapshot.life.openSession.activity, startTime: snapshot.life.openSession.startTime } : null,
     })}`,
     `Active reminders: ${JSON.stringify(snapshot.reminders.map((reminder) => ({
       text: reminder.text,
