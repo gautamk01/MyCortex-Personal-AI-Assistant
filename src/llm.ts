@@ -39,10 +39,11 @@ export async function chat(
   };
 
   try {
-    return await client.chat.completions.create({
+    const res = await client.chat.completions.create({
       model: config.llmModel,
       ...reqOptions,
     });
+    return res;
   } catch (error) {
     if (config.backupModel) {
       console.warn(`⚠️ Primary LLM (${config.llmModel}) failed. Falling back to BACKUP_MODEL (${config.backupModel}). Error:`, error instanceof Error ? error.message : error);

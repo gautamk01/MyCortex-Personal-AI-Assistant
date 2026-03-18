@@ -11,7 +11,7 @@ import { pruneContext } from "./memory/context-pruner.js";
 import { storeEpisode } from "./memory/semantic-memory.js";
 import { autoExtract } from "./memory/auto-extract.js";
 import { attemptAutoLog } from "./auto-logging.js";
-import { markRecentHeartbeatResponded } from "./coach.js";
+import { markRecentHeartbeatResponded, markUserActive } from "./coach.js";
 
 export type AgentProgressPhase =
   | "checking_memory"
@@ -50,7 +50,10 @@ export async function runAgentLoop(
 ): Promise<string> {
   const history = getHistory(chatId);
   const tools = getToolDefinitions();
+  
   markRecentHeartbeatResponded(chatId);
+  markUserActive(chatId);
+
   const autoLogNote = await attemptAutoLog(chatId, userMessage).catch(() => null);
   const preparedUserMessage = autoLogNote
     ? `${userMessage}\n\n[System note: ${autoLogNote} Acknowledge it briefly and do not log the same activity again unless the user asks.]`

@@ -44,6 +44,7 @@ Return a JSON object with these fields:
   - status: "active" when the user is still working on / planning / worried about it soon, "done" when they clearly finished it, "stale" when they clearly switched away from it
   - subject: a short natural phrase like "resume edits", "DBMS revision", "calling the recruiter"
   - Only include topics that are worth asking about in the next few hours or later today
+  - CRITICAL: DO NOT extract or update a context if it was ONLY mentioned by the Assistant. The User MUST have actively discussed it, initiated it, or provided a meaningful update on it.
 
 Rules:
 - Only extract NEW, meaningful information. Skip greetings, filler, and obvious context.
@@ -147,6 +148,7 @@ export async function autoExtract(
             context.subject,
             "active",
             { reason: context.reason || "conversation", source: "conversation" },
+            false, // Never bump lastSeenAt from auto-extract — only the original INSERT sets it
           );
         } else {
           setHeartbeatContextStatus(chatId, context.subject, status);

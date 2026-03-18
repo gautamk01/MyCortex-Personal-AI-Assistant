@@ -81,6 +81,7 @@ export interface HeartbeatContextCandidate {
   sourceType: HeartbeatContextSource;
   priority: number;
   askCount: number;
+  lastSeenAt: string;
   theme: HeartbeatTheme;
   reason: string;
   observation: string;
@@ -121,6 +122,7 @@ export function buildContextCandidates(
     theme: HeartbeatTheme,
     reason: string,
     observation: string,
+    lastSeenAt: string,
   ) => {
     const contextKey = normalizeContextKey(subject);
     if (!contextKey || seen.has(`${sourceType}:${contextKey}`)) return;
@@ -131,6 +133,7 @@ export function buildContextCandidates(
       sourceType,
       priority,
       askCount: getCandidateAskCount(snapshot, contextKey),
+      lastSeenAt,
       theme,
       reason,
       observation,
@@ -145,18 +148,19 @@ export function buildContextCandidates(
       "focus",
       "open_life_session",
       `You have ${snapshot.life.openSession.activity} open since ${snapshot.life.openSession.startTime}.`,
+      snapshot.date + "T" + snapshot.life.openSession.startTime + ":00"
     );
   }
 
   for (const context of snapshot.contexts.filter((item) => item.sourceType === "conversation")) {
-    const priority = isTodayTimestamp(snapshot.date, context.updatedAt) ? 90 : 55;
     pushCandidate(
       context.sourceType,
       context.subject,
-      priority,
+      90,
       "focus",
-      isTodayTimestamp(snapshot.date, context.updatedAt) ? "today_conversation_context" : "recent_conversation_context",
-      `Earlier you were on ${context.subject}.`,
+      "recent_conversation_context",
+      `You were recently working on ${context.subject}.`,
+      context.firstSeenAt || context.createdAt,
     );
   }
 
@@ -169,6 +173,7 @@ export function buildContextCandidates(
       "focus",
       "plan_in_progress",
       `${item.title} is marked in progress on today's plan.`,
+      snapshot.date + "T00:00:00"
     );
   }
 
@@ -183,6 +188,7 @@ export function buildContextCandidates(
       "plan",
       "open_must_do",
       `${item.title} is still open on today's must-do list.`,
+      snapshot.date + "T00:00:00"
     );
   }
 
@@ -198,10 +204,15 @@ export function buildContextCandidates(
       "work_log",
       "latest_work_log",
       `Your last logged work was ${workSubject}.`,
+      snapshot.date + "T00:00:00"
     );
   }
 
-  return candidates.sort((a, b) => b.priority - a.priority || a.askCount - b.askCount);
+  return candidates.sort((a, b) => {
+    const timeCompare = b.lastSeenAt.localeCompare(a.lastSeenAt);
+    if (timeCompare !== 0) return timeCompare;
+    return b.priority - a.priority;
+  });
 }
 
 export function chooseContextCandidate(
@@ -209,13 +220,8 @@ export function chooseContextCandidate(
 ): HeartbeatContextCandidate | null {
   const candidates = buildContextCandidates(snapshot);
   if (candidates.length === 0) return null;
-  if (candidates.length === 1) return candidates[0];
-
-  const [best, second] = candidates;
-  if (best.askCount > 0 && second.priority >= best.priority - 8) {
-    return second;
-  }
-  return best;
+  // Always pick the most recent context (sorted by firstSeenAt DESC)
+  return candidates[0];
 }
 
 function buildMorningMessage(chatId: number): string {
@@ -340,11 +346,13 @@ function buildToneInstruction(tone: CoachToneMode): string {
   }
 }
 
-function buildFallbackHourlyPrompt(
+export function buildHourlyPrompt(
   chatId: number,
   snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
   theme: HeartbeatTheme,
   tone: CoachToneMode,
+  inactivityHours: number,
+  selectedCandidate: HeartbeatContextCandidate | null,
 ): string {
   const planStats = snapshot.plan ? getDailyPlanStats(snapshot.plan) : null;
   const planSummary = planStats
@@ -358,112 +366,44 @@ function buildFallbackHourlyPrompt(
     : { total: 0, done: 0, mustDone: 0, mustTotal: 0, openMusts: [] };
 
   return [
-    "You are sending a short hourly accountability ping in Telegram.",
+    "You are texting your close friend on Telegram. Keep it super casual and natural — like a real person checking in, not a bot or coach.",
+    "Write exactly 1 short message. Use natural language, slang is okay, emoji sparingly. No bullet points, no lists, no essays.",
     buildToneInstruction(tone),
-    "Return only 1 to 3 short lines.",
-    "No fluff. No essay. No generic motivation.",
-    "Mention one concrete observation and one direct question or instruction.",
-    "Only ask a generic 'What are you doing right now?' if there is no concrete task, plan item, or recent context.",
+    inactivityHours >= 2
+      ? `They haven't texted you in ${Math.floor(inactivityHours)} hours. Casually ask what happened — like a friend going "dude where'd you go?" or "you alive?". Mention you haven't heard from them in a while.`
+      : selectedCandidate
+      ? `They were working on "${selectedCandidate.subject}". Casually ask how it went — like "so did you end up doing [thing]?" or "how'd [thing] go?". Don't be robotic about it.`
+      : "Just casually ask what they're up to right now.",
     "",
-    `Theme: ${theme}`,
-    `Date: ${snapshot.date}`,
-    `Recent themes to avoid repeating: ${snapshot.recentThemes.join(", ") || "none"}`,
-    `Recent Conversation Context:\n${formatRecentHistory(chatId)}`,
-    `Active conversation contexts: ${JSON.stringify(snapshot.contexts.map((context) => ({
-      subject: context.subject,
-      updatedAt: context.updatedAt,
-      askCount: context.askCount,
-    })))} `,
-    `Plan snapshot: ${JSON.stringify(planSummary)}`,
-    `Work snapshot: ${JSON.stringify({
-      totalMinutes: snapshot.work.totalMinutes,
-      totalsByCategory: snapshot.work.totalsByCategory,
-      lastLog: snapshot.work.logs.length > 0 ? snapshot.work.logs[snapshot.work.logs.length - 1] : null,
-    })}`,
-    `Life snapshot: ${JSON.stringify({
-      totalMinutes: snapshot.life.totalMinutes,
-      focusedMinutes: snapshot.life.focusedMinutes,
-      breakMinutes: snapshot.life.breakMinutes,
-      entertainmentMinutes: snapshot.life.entertainmentMinutes,
-      wakeUpTime: snapshot.life.wakeUpTime,
-      timelineCount: snapshot.life.timeline.length,
-      openSession: snapshot.life.openSession ? { activity: snapshot.life.openSession.activity, startTime: snapshot.life.openSession.startTime } : null,
-    })}`,
-    `Active reminders: ${JSON.stringify(snapshot.reminders.map((reminder) => ({
-      text: reminder.text,
-      dueAtIso: reminder.dueAtIso,
-    })))} `,
-    `Coach profile: ${JSON.stringify({
-      toneMode: snapshot.profile.toneMode,
-      driftScore: snapshot.profile.driftScore,
-      loggingReliability: snapshot.profile.loggingReliability,
-    })}`,
-  ].join("\n");
+    `Time: ${getISTDateTime().time}`,
+    `Recent chat:\n${formatRecentHistory(chatId)}`,
+    planSummary.openMusts.length > 0
+      ? `Open must-dos: ${planSummary.openMusts.join(", ")}`
+      : "",
+  ].filter(Boolean).join("\n");
 }
 
-function buildQuestionForStage(
-  stage: number,
-  tone: CoachToneMode,
-  subject: string,
-): string {
-  const quotedSubject = `"${subject}"`;
 
-  if (stage <= 0) {
-    if (tone === "supportive") return `How is ${quotedSubject} going?`;
-    return `How is ${quotedSubject} going?`;
-  }
-
-  if (stage === 1) {
-    if (tone === "supportive") return `Did you get through ${quotedSubject}?`;
-    if (tone === "strict") return `Did you finish ${quotedSubject}?`;
-    return `Did you finish ${quotedSubject}?`;
-  }
-
-  if (tone === "supportive") return `What is still blocking ${quotedSubject}?`;
-  if (tone === "strict") return `What is still blocking ${quotedSubject}?`;
-  return `What's still blocking ${quotedSubject}?`;
-}
-
-export function buildContextDrivenMessage(
-  candidate: HeartbeatContextCandidate,
-  tone: CoachToneMode,
-): string {
-  const observation = candidate.observation;
-  const question = buildQuestionForStage(candidate.askCount, tone, candidate.subject);
-
-  if (tone === "supportive") {
-    return `${observation}\n${question}`;
-  }
-
-  if (tone === "strict" && candidate.askCount >= 2) {
-    return `${observation}\n${question} Answer plainly.`;
-  }
-
-  if (tone === "warm_firm" && candidate.askCount >= 1) {
-    return `${observation}\n${question} Keep it concrete.`;
-  }
-
-  return `${observation}\n${question}`;
-}
-
-async function generateFallbackHourlyMessage(
+export async function generateHourlyMessage(
   chatId: number,
   snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>,
   theme: HeartbeatTheme,
   tone: CoachToneMode,
+  inactivityHours: number = 0,
+  selectedCandidate: HeartbeatContextCandidate | null = null,
 ): Promise<string> {
   const messages: ChatCompletionMessageParam[] = [
-    { role: "user", content: buildFallbackHourlyPrompt(chatId, snapshot, theme, tone) },
+    { role: "user", content: buildHourlyPrompt(chatId, snapshot, theme, tone, inactivityHours, selectedCandidate) },
   ];
 
   const response = await chat(
-    "You are a concise accountability coach.",
+    "You are a close friend who texts casually. You care about your friend's progress but you talk like a real person, not a coach or assistant.",
     messages,
     [],
-    { maxTokens: 140 },
+    { maxTokens: 800 },
   );
 
-  return response.choices[0]?.message?.content?.trim() || "What are you doing right now?";
+  return response.choices[0]?.message?.content?.trim() || "Hey, just checking in — how's it going? 🙂";
 }
 
 export async function sendMorningCheckIn(chatId: number): Promise<void> {
@@ -486,13 +426,38 @@ export async function sendHourlyCheckIn(chatId: number): Promise<void> {
       snapshot.life.entertainmentMinutes > snapshot.life.focusedMinutes &&
       snapshot.profile.driftScore > 0.8;
     const tone = chooseHeartbeatToneFromProfile(snapshot.profile, lowMoodSignal);
-    const selectedCandidate = chooseContextCandidate(snapshot);
+
+    // Calculate Inactivity
+    let inactivityHours = 0;
+    const now = new Date();
+    const currentHour = now.getHours();
+    
+    // Skip inactivity check during sleep hours (12 AM - 7 AM)
+    if (snapshot.profile.lastActiveAt && currentHour >= 7 || currentHour < 0 /* impossible but safe */) {
+      const lastActive = new Date(snapshot.profile.lastActiveAt + "Z"); // UTC
+      const diffMs = now.getTime() - lastActive.getTime();
+      inactivityHours = diffMs / (1000 * 60 * 60);
+      
+      // Handle the sleep overlap: If last message was before 7AM today, don't ping them for inactivity just yet
+      const startOfActiveDay = new Date(now);
+      startOfActiveDay.setHours(7, 0, 0, 0);
+      if (lastActive.getTime() < startOfActiveDay.getTime()) {
+        inactivityHours = 0;
+      }
+    }
+
+    // Determine candidates and fallback
+    let selectedCandidate = chooseContextCandidate(snapshot);
     const fallbackTheme = chooseTheme(snapshot);
     const theme = selectedCandidate?.theme ?? fallbackTheme.theme;
     const reason = selectedCandidate?.reason ?? fallbackTheme.reason;
-    const text = selectedCandidate
-      ? buildContextDrivenMessage(selectedCandidate, tone)
-      : await generateFallbackHourlyMessage(chatId, snapshot, theme, tone);
+
+    // If they have been inactive for > 2 hours, FORCE the fallback LLM ping so it challenges them
+    if (inactivityHours >= 2) {
+      selectedCandidate = null;
+    }
+
+    const text = await generateHourlyMessage(chatId, snapshot, theme, tone, inactivityHours, selectedCandidate);
 
     if (selectedCandidate) {
       upsertHeartbeatContext(
@@ -501,6 +466,7 @@ export async function sendHourlyCheckIn(chatId: number): Promise<void> {
         selectedCandidate.subject,
         "active",
         { reason: selectedCandidate.reason, observation: selectedCandidate.observation },
+        false, // Do NOT artificially update lastSeenAt
       );
       markHeartbeatContextAsked(chatId, selectedCandidate.contextKey);
     }

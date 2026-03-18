@@ -25,6 +25,7 @@ export interface CoachProfile {
   loggingReliability: number;
   activeStartHour: number;
   activeEndHour: number;
+  lastActiveAt?: string;
 }
 
 export interface DailySummaryRecord {
@@ -163,7 +164,7 @@ export function getCoachProfile(chatId: number): CoachProfile {
   let profile = getDb()
     .prepare(`
       SELECT chatId, toneMode, encouragementStyle, pressureStyle, driftScore,
-             loggingReliability, activeStartHour, activeEndHour
+             loggingReliability, activeStartHour, activeEndHour, lastActiveAt
       FROM coach_profiles
       WHERE chatId = ?
     `)
@@ -186,6 +187,19 @@ export function getCoachProfile(chatId: number): CoachProfile {
   }
 
   return profile;
+}
+
+export function markUserActive(chatId: number): void {
+  // Ensure profile exists
+  getCoachProfile(chatId);
+  getDb()
+    .prepare(`
+      UPDATE coach_profiles
+      SET lastActiveAt = datetime('now'),
+          updatedAt = datetime('now')
+      WHERE chatId = ?
+    `)
+    .run(chatId);
 }
 
 export function getCoachProfileContext(chatId: number): string {
@@ -564,6 +578,7 @@ export function upsertHeartbeatContext(
   subject: string,
   status: HeartbeatContextStatus = "active",
   evidence: Record<string, unknown> = {},
+  updateLastSeenAt: boolean = true,
 ): void {
   const trimmedSubject = subject.trim();
   if (!trimmedSubject) return;
@@ -582,17 +597,30 @@ export function upsertHeartbeatContext(
     | undefined;
 
   if (existing) {
-    getDb()
-      .prepare(`
-        UPDATE heartbeat_contexts
-        SET subject = ?,
-            status = ?,
-            evidenceJson = ?,
-            lastSeenAt = datetime('now'),
-            updatedAt = datetime('now')
-        WHERE id = ?
-      `)
-      .run(trimmedSubject, status, JSON.stringify(evidence), existing.id);
+    if (updateLastSeenAt) {
+      getDb()
+        .prepare(`
+          UPDATE heartbeat_contexts
+          SET subject = ?,
+              status = ?,
+              evidenceJson = ?,
+              lastSeenAt = datetime('now'),
+              updatedAt = datetime('now')
+          WHERE id = ?
+        `)
+        .run(trimmedSubject, status, JSON.stringify(evidence), existing.id);
+    } else {
+      getDb()
+        .prepare(`
+          UPDATE heartbeat_contexts
+          SET subject = ?,
+              status = ?,
+              evidenceJson = ?,
+              updatedAt = datetime('now')
+          WHERE id = ?
+        `)
+        .run(trimmedSubject, status, JSON.stringify(evidence), existing.id);
+    }
     return;
   }
 
@@ -631,7 +659,7 @@ export function listActiveHeartbeatContexts(chatId: number, limit = 5): Heartbea
       FROM heartbeat_contexts
       WHERE chatId = ?
         AND status = 'active'
-        AND updatedAt >= ?
+        AND firstSeenAt >= ?
       ORDER BY
         CASE sourceType
           WHEN 'conversation' THEN 1
@@ -640,7 +668,7 @@ export function listActiveHeartbeatContexts(chatId: number, limit = 5): Heartbea
           WHEN 'work_log' THEN 4
           ELSE 5
         END,
-        updatedAt DESC
+        firstSeenAt DESC
       LIMIT ?
     `)
     .all(chatId, getHeartbeatContextCutoff(), limit) as HeartbeatContextRecord[];
@@ -651,8 +679,7 @@ export function markHeartbeatContextAsked(chatId: number, contextKey: string): v
     .prepare(`
       UPDATE heartbeat_contexts
       SET lastAskedAt = datetime('now'),
-          askCount = askCount + 1,
-          updatedAt = datetime('now')
+          askCount = askCount + 1
       WHERE chatId = ? AND contextKey = ?
     `)
     .run(chatId, contextKey);

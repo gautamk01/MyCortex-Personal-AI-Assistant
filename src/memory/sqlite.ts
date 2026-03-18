@@ -165,6 +165,7 @@ export function initDatabase(): void {
       loggingReliability  REAL DEFAULT 0.5,
       activeStartHour     INTEGER DEFAULT 8,
       activeEndHour       INTEGER DEFAULT 22,
+      lastActiveAt        TEXT DEFAULT (datetime('now')),
       updatedAt           TEXT DEFAULT (datetime('now'))
     )
   `);
@@ -256,6 +257,13 @@ export function initDatabase(): void {
       updatedAt TEXT DEFAULT (datetime('now'))
     )
   `);
+
+  // Check and add lastActiveAt column to coach_profiles if it's missing (migration)
+  const coachCols = getDb().prepare(`PRAGMA table_info(coach_profiles)`).all() as { name: string }[];
+  if (!coachCols.some((c) => c.name === "lastActiveAt")) {
+    getDb().prepare(`ALTER TABLE coach_profiles ADD COLUMN lastActiveAt TEXT`).run();
+    getDb().prepare(`UPDATE coach_profiles SET lastActiveAt = datetime('now')`).run();
+  }
 
   console.log("🧠 SQLite memory database initialized");
 }
