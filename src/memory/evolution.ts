@@ -236,7 +236,7 @@ export function getMemoryStats(chatId: number): string {
 export async function runMaintenance(chatId: number): Promise<string> {
   const results: string[] = [];
   results.push(decayMemories());
-  results.push(`Removed ${cleanupOldHeartbeatContexts(2)} heartbeat contexts older than 2 days.`);
+  results.push(`Removed ${cleanupOldHeartbeatContexts(1)} heartbeat contexts older than 24 hours.`);
   results.push(await mergeDuplicates(chatId));
   return `🔧 Memory Maintenance Complete\n${results.join("\n")}`;
 }
@@ -246,7 +246,7 @@ export async function runGlobalMaintenance(): Promise<void> {
   try {
     const results: string[] = [];
     results.push(decayMemories());
-    results.push(`Removed ${cleanupOldHeartbeatContexts(2)} heartbeat contexts older than 2 days.`);
+    results.push(`Removed ${cleanupOldHeartbeatContexts(1)} heartbeat contexts older than 24 hours.`);
 
     const users = getDb().prepare("SELECT DISTINCT chatId FROM facts").all() as Array<{ chatId: number }>;
     for (const { chatId } of users) {

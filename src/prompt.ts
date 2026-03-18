@@ -169,6 +169,15 @@ ${soulPrompt}
 `;
 
 export function getSystemPrompt(interfaceMode: "gui" | "terminal" = "terminal"): string {
+  // Inject fresh current time so the LLM never hallucinates a stale timestamp
+  const now = new Date();
+  const istTime = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(now);
+  const timeContext = `[System clock — ${istTime} IST. Do NOT announce this unless the user asks for the time or it is directly relevant to the conversation (e.g. discussing schedules, deadlines, or reminders).]\n\n`;
+
   let modeInstructions = "";
   if (interfaceMode === "gui") {
     modeInstructions = "\n\n## Current Mode: GUI\n" +
@@ -192,7 +201,7 @@ If the user asks you to perform local actions, test local code, or open local ap
 Do not attempt local actions while this alert is active.`;
   }
 
-  return BASE_PROMPT + modeInstructions + environmentInstructions + getSkillsPromptSection();
+  return timeContext + BASE_PROMPT + modeInstructions + environmentInstructions + getSkillsPromptSection();
 }
 
 // Keep backward compatibility
