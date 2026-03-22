@@ -201,25 +201,7 @@ function showUserTranscript(text) {
 function showProgress(text) {
   if (state.isProcessing && !userTranscript.classList.contains('hidden')) {
     stateLabel.textContent = text.toUpperCase();
-    speakProgressLocally(text);
   }
-}
-
-function speakProgressLocally(text) {
-  if (!('speechSynthesis' in window)) return;
-  // Cancel any ongoing progress speech
-  window.speechSynthesis.cancel();
-  
-  const utterance = new SpeechSynthesisUtterance(text);
-  // Try to find a friendly English voice
-  const voices = window.speechSynthesis.getVoices();
-  const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Female') || v.name.includes('Google'))) || voices[0];
-  if (preferredVoice) utterance.voice = preferredVoice;
-  
-  // Keep the volume slightly lower so it feels like background "thinking"
-  utterance.volume = 0.6; 
-  utterance.rate = 1.1;
-  window.speechSynthesis.speak(utterance);
 }
 
 function showAIResponse(text) {
@@ -273,7 +255,6 @@ async function startRecording() {
 
   if (state.isSpeaking) {
     console.log('🛑 Interrupting AI response...');
-    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (state.currentAudioSource) {
       state.currentAudioSource.stop();
       state.currentAudioSource = null;
@@ -406,9 +387,13 @@ async function handleAudioResponse(arrayBuffer) {
       await state.audioContext.resume();
     }
 
-    // Stop any ongoing progress speech from the browser
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
+    // Stop any currently playing audio (filler or previous response)
+    if (state.currentAudioSource) {
+      try {
+        state.currentAudioSource.onended = null; // Prevent state reset from old source
+        state.currentAudioSource.stop();
+      } catch { /* already stopped */ }
+      state.currentAudioSource = null;
     }
 
     console.log(`🔊 Decoding ${arrayBuffer.byteLength} bytes of audio...`);

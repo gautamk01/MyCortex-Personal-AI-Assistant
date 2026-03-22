@@ -20,7 +20,7 @@ export type AgentProgressPhase =
   | "writing_response";
 
 export interface AgentProgressReporter {
-  update: (phase: AgentProgressPhase) => void | Promise<void>;
+  update: (phase: AgentProgressPhase | string) => void | Promise<void>;
 }
 
 // ── Per-chat conversation history ──────────────────────────────
@@ -123,7 +123,7 @@ export async function runAgentLoop(
     // If model wants to use tools, execute them
     if (choice.finish_reason === "tool_calls" || message.tool_calls.length > 0) {
       await progress?.update("using_tools");
-      const toolResults = await executeToolCalls(chatId, message.tool_calls, messageId);
+      const toolResults = await executeToolCalls(chatId, message.tool_calls, messageId, progress);
 
       // Append each tool result to history
       for (const result of toolResults) {
@@ -153,6 +153,7 @@ async function executeToolCalls(
   chatId: number,
   toolCalls: ChatCompletionToolCall[],
   messageId?: number,
+  progress?: AgentProgressReporter,
 ): Promise<ChatCompletionMessageParam[]> {
   const results: ChatCompletionMessageParam[] = [];
 
@@ -168,8 +169,10 @@ async function executeToolCalls(
 
     try {
       console.log(`🔧 Tool call: ${funcName}(${JSON.stringify(funcArgs)})`);
+      await progress?.update(`Tool call: ${funcName}(${JSON.stringify(funcArgs)})`);
       const result = await executeTool(funcName, { ...funcArgs, __chatId: chatId, __messageId: messageId });
       console.log(`✅ Tool result: ${result.slice(0, 200)}`);
+      await progress?.update(`Tool result: ${funcName}: ${result.slice(0, 100)}`);
 
       results.push({
         role: "tool",

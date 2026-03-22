@@ -99,6 +99,15 @@ export const config = {
   dashboardSecret: process.env.DASHBOARD_SECRET ?? process.env.SYNC_SECRET ?? "",
 
   // ── External APIs ──────────────────────────────────────────
+  /** Groq API Key */
+  groqApiKey: process.env.GROQ_API_KEY ?? "",
+
+  /** ElevenLabs API Key (ultra-fast filler TTS) */
+  elevenLabsApiKey: process.env.ELEVENLABS_API_KEY ?? "",
+
+  /** ElevenLabs Voice ID */
+  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID ?? "pNInz6obpgDQGcFmaJgB",
+
   /** Sarvam AI API Key */
   sarvamApiKey: process.env.SARVAM_API_KEY ?? "",
 

@@ -148,6 +148,10 @@ export function startVoiceServer(server?: http.Server): WebSocketServer {
           },
           (progressText) => {
             sendJson(ws, { type: "progress", text: progressText });
+          },
+          (fillerAudio) => {
+            sendJson(ws, { type: "status", status: "speaking" });
+            ws.send(fillerAudio);
           }
         );
 
@@ -156,8 +160,6 @@ export function startVoiceServer(server?: http.Server): WebSocketServer {
           sendJson(ws, { type: "status", status: "ready" });
           return;
         }
-
-        // Send text response
 
         // Send text response
         sendJson(ws, { type: "response", text: result.responseText });
