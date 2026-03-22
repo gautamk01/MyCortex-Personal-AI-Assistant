@@ -89,16 +89,11 @@ export async function runVoicePipeline(
         const nextThought = thoughtQueue.shift();
         if (!nextThought || fillersCancelled) continue;
 
-        // Try ElevenLabs, fallback to Kokoro
+        // Use Local TTS (Kokoro)
         let audio: Buffer | null = null;
         let isElevenLabs = false;
         try {
-          audio = await elevenLabsQuickTTS(nextThought);
-          if (audio) {
-            isElevenLabs = true;
-          } else {
-            audio = await textToSpeech(nextThought);
-          }
+          audio = await textToSpeech(nextThought);
         } catch (err) {
           console.error("TTS failed for thought:", err);
         }
