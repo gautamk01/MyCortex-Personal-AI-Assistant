@@ -265,6 +265,30 @@ export function initDatabase(): void {
     getDb().prepare(`UPDATE coach_profiles SET lastActiveAt = datetime('now')`).run();
   }
 
+  // Migrate entities table: add importance, accessCount, lastAccessed if missing
+  const entityCols = getDb().prepare(`PRAGMA table_info(entities)`).all() as { name: string }[];
+  if (!entityCols.some((c) => c.name === "importance")) {
+    getDb().prepare(`ALTER TABLE entities ADD COLUMN importance REAL DEFAULT 1.0`).run();
+  }
+  if (!entityCols.some((c) => c.name === "accessCount")) {
+    getDb().prepare(`ALTER TABLE entities ADD COLUMN accessCount INTEGER DEFAULT 0`).run();
+  }
+  if (!entityCols.some((c) => c.name === "lastAccessed")) {
+    getDb().prepare(`ALTER TABLE entities ADD COLUMN lastAccessed TEXT DEFAULT (datetime('now'))`).run();
+  }
+
+  // Migrate relations table: add importance, accessCount, lastAccessed if missing
+  const relationCols = getDb().prepare(`PRAGMA table_info(relations)`).all() as { name: string }[];
+  if (!relationCols.some((c) => c.name === "importance")) {
+    getDb().prepare(`ALTER TABLE relations ADD COLUMN importance REAL DEFAULT 1.0`).run();
+  }
+  if (!relationCols.some((c) => c.name === "accessCount")) {
+    getDb().prepare(`ALTER TABLE relations ADD COLUMN accessCount INTEGER DEFAULT 0`).run();
+  }
+  if (!relationCols.some((c) => c.name === "lastAccessed")) {
+    getDb().prepare(`ALTER TABLE relations ADD COLUMN lastAccessed TEXT DEFAULT (datetime('now'))`).run();
+  }
+
   console.log("🧠 SQLite memory database initialized");
 }
 
