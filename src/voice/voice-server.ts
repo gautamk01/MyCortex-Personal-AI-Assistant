@@ -139,8 +139,17 @@ export function startVoiceServer(server?: http.Server): WebSocketServer {
         console.log(`🎤 Received audio: ${audioBuffer.length} bytes`);
         sendJson(ws, { type: "status", status: "processing" });
 
-        // Run the full voice pipeline
-        const result = await runVoicePipeline(audioBuffer, clientChatId);
+        // Run the full voice pipeline with real-time callbacks
+        const result = await runVoicePipeline(
+          audioBuffer, 
+          clientChatId,
+          (transcript) => {
+            sendJson(ws, { type: "transcript", text: transcript });
+          },
+          (progressText) => {
+            sendJson(ws, { type: "progress", text: progressText });
+          }
+        );
 
         if (result.error) {
           sendJson(ws, { type: "error", message: result.error });
@@ -148,8 +157,7 @@ export function startVoiceServer(server?: http.Server): WebSocketServer {
           return;
         }
 
-        // Send transcript
-        sendJson(ws, { type: "transcript", text: result.transcript });
+        // Send text response
 
         // Send text response
         sendJson(ws, { type: "response", text: result.responseText });

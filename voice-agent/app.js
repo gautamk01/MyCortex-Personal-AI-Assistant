@@ -128,6 +128,9 @@ function handleJsonMessage(msg) {
     case 'transcript':
       showUserTranscript(msg.text);
       break;
+    case 'progress':
+      showProgress(msg.text);
+      break;
     case 'response':
       showAIResponse(msg.text);
       break;
@@ -195,6 +198,30 @@ function showUserTranscript(text) {
   userTranscript.classList.remove('hidden');
 }
 
+function showProgress(text) {
+  if (state.isProcessing && !userTranscript.classList.contains('hidden')) {
+    stateLabel.textContent = text.toUpperCase();
+    speakProgressLocally(text);
+  }
+}
+
+function speakProgressLocally(text) {
+  if (!('speechSynthesis' in window)) return;
+  // Cancel any ongoing progress speech
+  window.speechSynthesis.cancel();
+  
+  const utterance = new SpeechSynthesisUtterance(text);
+  // Try to find a friendly English voice
+  const voices = window.speechSynthesis.getVoices();
+  const preferredVoice = voices.find(v => v.lang.startsWith('en') && (v.name.includes('Female') || v.name.includes('Google'))) || voices[0];
+  if (preferredVoice) utterance.voice = preferredVoice;
+  
+  // Keep the volume slightly lower so it feels like background "thinking"
+  utterance.volume = 0.6; 
+  utterance.rate = 1.1;
+  window.speechSynthesis.speak(utterance);
+}
+
 function showAIResponse(text) {
   aiResponseText.textContent = text;
   aiResponse.classList.remove('hidden');
@@ -246,6 +273,7 @@ async function startRecording() {
 
   if (state.isSpeaking) {
     console.log('🛑 Interrupting AI response...');
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     if (state.currentAudioSource) {
       state.currentAudioSource.stop();
       state.currentAudioSource = null;
@@ -376,6 +404,11 @@ async function handleAudioResponse(arrayBuffer) {
     }
     if (state.audioContext.state === 'suspended') {
       await state.audioContext.resume();
+    }
+
+    // Stop any ongoing progress speech from the browser
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
 
     console.log(`🔊 Decoding ${arrayBuffer.byteLength} bytes of audio...`);
