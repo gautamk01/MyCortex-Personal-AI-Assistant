@@ -2,7 +2,8 @@ import { config } from "../config.js";
 import { localSpeechToText } from "./local-stt.js";
 import { textToSpeech } from "../tts.js";
 import { elevenLabsQuickTTS } from "./elevenlabs-tts.js";
-import { getInstantFiller, generateToolFiller } from "./groq-filler.js";
+import { generateToolFiller } from "./groq-filler.js";
+import { getRandomFillerAudio } from "./filler-cache.js";
 import { runAgentLoop } from "../agent.js";
 import { stripTelegramHtml } from "../telegram-html.js";
 import type { AgentProgressReporter } from "../agent.js";
@@ -43,52 +44,74 @@ export async function runVoicePipeline(
   let userTranscript = "";
   let lastFillerSentAt = 0;
 
-  // Sequential promise chain — ensures fillers play one after another, never overlapping
-  let fillerChain: Promise<void> = Promise.resolve();
+  // ── Filler loop state ───────────────────────────────────────
+  let isLoopRunning = false;
+  let currentFillerPromise: Promise<void> | null = null;
+  let activeAudioDurationMs = 0;
 
   /**
-   * Enqueue a filler into the sequential chain.
-   * Each filler waits for the previous one to finish before starting.
-   * Respects throttle and cancellation.
+   * Starts a continuous loop that plays pre-cached filler audio phrases
+   * back-to-back (with a small gap) until cancelled.
    */
-  function enqueueFiller(toolName: string, toolArgs: string) {
-    fillerChain = fillerChain.then(async () => {
-      if (fillersCancelled) return;
+  function startFillerLoop() {
+    if (isLoopRunning || fillersCancelled) return;
+    isLoopRunning = true;
+    console.log(`▶️ Starting continuous filler loop...`);
 
-      // Throttle: skip if we spoke a filler too recently
-      const now = Date.now();
-      if (now - lastFillerSentAt < FILLER_THROTTLE_MS) {
-        console.log(`⏭️ Filler throttled (${now - lastFillerSentAt}ms since last)`);
-        return;
+    const loop = async () => {
+      while (isLoopRunning && !fillersCancelled) {
+        // Only play a generic filler if no context-aware filler was played recently
+        const now = Date.now();
+        if (now - lastFillerSentAt > FILLER_THROTTLE_MS) {
+          const audio = getRandomFillerAudio();
+          if (audio && onFillerAudio) {
+            onFillerAudio(audio);
+            lastFillerSentAt = Date.now();
+            // Estimate duration based on byte size (approx 100kb/sec for TTS)
+            activeAudioDurationMs = Math.max(1000, (audio.length / 100000) * 1000);
+          }
+        }
+        
+        // Wait for the audio to finish + 500ms gap, checking cancellation midway
+        const waitMs = activeAudioDurationMs + 500;
+        await new Promise(r => setTimeout(r, waitMs));
       }
+    };
+    
+    currentFillerPromise = loop();
+  }
 
-      try {
-        // Try instant pre-written filler first (0ms), then Groq fallback
-        let fillerText = getInstantFiller(toolName);
-        if (!fillerText) {
-          fillerText = await generateToolFiller(userTranscript, toolName, toolArgs);
-        }
-        if (!fillerText || fillersCancelled) return;
+  /**
+   * Interrupts the loop to play a specific, context-aware Groq filler (e.g., for a tool call).
+   */
+  async function triggerContextAwareFiller(toolName: string, toolArgs: string) {
+    if (fillersCancelled) return;
+    
+    // Throttle context-aware fillers
+    const now = Date.now();
+    if (now - lastFillerSentAt < FILLER_THROTTLE_MS) return;
 
-        console.log(`💬 Filler: "${fillerText}" [${fillerText === getInstantFiller(toolName) ? 'instant' : 'groq'}]`);
-        if (onProgress) onProgress(fillerText);
+    try {
+      const fillerText = await generateToolFiller(userTranscript, toolName, toolArgs);
+      if (!fillerText || fillersCancelled) return;
 
-        if (fillersCancelled) return;
+      console.log(`💬 Context Filler: "${fillerText}"`);
+      if (onProgress) onProgress(fillerText);
 
-        // Try ElevenLabs first (ultra-fast ~100-200ms), fall back to Kokoro
-        let audio = await elevenLabsQuickTTS(fillerText);
-        if (!audio) {
-          console.log(`⏩ ElevenLabs unavailable, falling back to Kokoro TTS...`);
-          audio = await textToSpeech(fillerText);
-        }
-        if (audio && !fillersCancelled && onFillerAudio) {
-          lastFillerSentAt = Date.now();
-          onFillerAudio(audio);
-        }
-      } catch (err) {
-        console.error("Filler error:", err);
+      // Try ElevenLabs first, fall back to Kokoro
+      let audio = await elevenLabsQuickTTS(fillerText);
+      if (!audio) {
+        audio = await textToSpeech(fillerText);
       }
-    });
+      
+      if (audio && !fillersCancelled && onFillerAudio) {
+        lastFillerSentAt = Date.now();
+        activeAudioDurationMs = Math.max(1000, (audio.length / 100000) * 1000);
+        onFillerAudio(audio);
+      }
+    } catch (err) {
+      console.error("Context filler error:", err);
+    }
   }
 
   const voiceProgress: AgentProgressReporter = {
@@ -98,12 +121,10 @@ export async function runVoicePipeline(
       // Agent phase events — generate fillers during thinking/memory phases
       if (msg === "checking_memory") {
         if (onProgress) onProgress("🧠 Checking memory...");
-        enqueueFiller("recall", "checking memory for context");
         return;
       }
       if (msg === "thinking") {
         if (onProgress) onProgress("💭 Thinking...");
-        enqueueFiller("thinking", "processing user request");
         return;
       }
       if (msg === "writing_response") {
@@ -116,7 +137,7 @@ export async function runVoicePipeline(
       if (toolCallMatch) {
         const [, toolName, toolArgs] = toolCallMatch;
         if (onProgress) onProgress(`⚙️ Using ${toolName}...`);
-        enqueueFiller(toolName, toolArgs || "");
+        triggerContextAwareFiller(toolName, toolArgs || "");
         return;
       }
 
@@ -163,9 +184,8 @@ export async function runVoicePipeline(
   if (onTranscript) onTranscript(transcript);
 
   // ── Step 1.5: Immediate initial filler ────────────────────
-  // Always speak a quick acknowledgment right after transcription
-  // so the user gets instant feedback that we heard them.
-  enqueueFiller("acknowledge", transcript);
+  // Start the continuous filler loop to instantly answer and fill all gaps
+  startFillerLoop();
 
   // ── Step 2: Agent Loop (fillers fire per-tool-call) ───────
   console.log(`🧠 Voice pipeline: running agent loop...`);
@@ -188,6 +208,7 @@ export async function runVoicePipeline(
 
   // NOW cancel fillers — the final audio is ready to play
   fillersCancelled = true;
+  isLoopRunning = false;
   console.log(`🛑 Fillers cancelled — final audio ready (${ttsAudio ? ttsAudio.length : 0} bytes)`);
 
   return {

@@ -234,7 +234,7 @@ async function getOrCreateMicStream() {
 
   state.micStream = stream;
 
-  // Set up analyser for visualizer
+  // Set up analyser for visualizer (shared by both Mic and TTS)
   if (!state.audioContext) {
     state.audioContext = new AudioContext({ sampleRate: 16000 });
   }
@@ -242,9 +242,12 @@ async function getOrCreateMicStream() {
     await state.audioContext.resume();
   }
 
+  if (!state.analyser) {
+    state.analyser = state.audioContext.createAnalyser();
+    state.analyser.fftSize = 256;
+  }
+
   const source = state.audioContext.createMediaStreamSource(stream);
-  state.analyser = state.audioContext.createAnalyser();
-  state.analyser.fftSize = 256;
   source.connect(state.analyser);
 
   return stream;
@@ -400,6 +403,15 @@ async function handleAudioResponse(arrayBuffer) {
     const audioBuffer = await state.audioContext.decodeAudioData(arrayBuffer.slice(0));
     const source = state.audioContext.createBufferSource();
     source.buffer = audioBuffer;
+    
+    // Create shared analyser if it doesn't exist yet (if user never used mic)
+    if (!state.analyser) {
+      state.analyser = state.audioContext.createAnalyser();
+      state.analyser.fftSize = 256;
+    }
+    
+    // Connect to both the visualizer AND the speakers
+    source.connect(state.analyser);
     source.connect(state.audioContext.destination);
 
     state.currentAudioSource = source;
@@ -413,18 +425,23 @@ async function handleAudioResponse(arrayBuffer) {
       if (state.isSpeaking) {
         state.isSpeaking = false;
         setOrbState('idle');
+        if (!state.isListening) {
+          stopVisualizer();
+        }
       }
     };
 
     source.start();
     state.isSpeaking = true;
     setOrbState('speaking');
+    startVisualizer();
     console.log(`🔊 Playing ${audioBuffer.duration.toFixed(1)}s of audio`);
   } catch (err) {
     console.error('Audio playback error:', err);
     showAIResponse('⚠️ Could not play audio response (check console for details)');
     state.isSpeaking = false;
     setOrbState('idle');
+    if (!state.isListening) stopVisualizer();
   }
 }
 

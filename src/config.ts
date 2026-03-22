@@ -77,9 +77,7 @@ export const config = {
   // ── File Operations ────────────────────────────────────────
   /** Allowed file paths (directories). Files outside these are blocked. */
   fileAllowedPaths: csvList(process.env.FILE_ALLOWED_PATHS, [
-    resolve("./workspace"),
-    resolve("."),
-    "/tmp",
+    "/",
   ]),
 
   /** Max file size in bytes for read/write operations */
@@ -106,7 +104,7 @@ export const config = {
   elevenLabsApiKey: process.env.ELEVENLABS_API_KEY ?? "",
 
   /** ElevenLabs Voice ID */
-  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID ?? "pNInz6obpgDQGcFmaJgB",
+  elevenLabsVoiceId: process.env.ELEVENLABS_VOICE_ID ?? "JBFqnCBsd6RMkjVDRZzb",
 
   /** Sarvam AI API Key */
   sarvamApiKey: process.env.SARVAM_API_KEY ?? "",
