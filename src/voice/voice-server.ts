@@ -5,7 +5,6 @@ import { resolve, extname } from "node:path";
 import { config } from "../config.js";
 import { runVoicePipeline } from "./voice-pipeline.js";
 import { checkLocalSttHealth } from "./local-stt.js";
-import { initFillerCache } from "./filler-cache.js";
 import type http from "node:http";
 
 /**
@@ -92,9 +91,6 @@ export function startVoiceServer(server?: http.Server): WebSocketServer {
       console.log(`🎤 Voice WebSocket: ws://localhost:${port}`);
     });
   }
-
-  // Pre-generate filler audio in the background (doesn't block server start)
-  initFillerCache().catch(console.error);
 
   console.log(`🎤 Voice WebSocket server listening on ${server ? "attached to HTTP server at /voice" : `ws://localhost:${port}`}`);
 

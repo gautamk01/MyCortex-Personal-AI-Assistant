@@ -643,8 +643,8 @@ async function createProgressController(
 
   return {
     reporter: {
-      update: async (phase: AgentProgressPhase) => {
-        await setLabel(getProgressLabel(phase));
+      update: async (phase: AgentProgressPhase | string) => {
+        await setLabel(getProgressLabel(phase as AgentProgressPhase));
         scheduleSlowUpdate();
       },
     },

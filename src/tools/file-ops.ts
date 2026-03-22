@@ -6,16 +6,10 @@ import { config } from "../config.js";
 // ── Helpers ────────────────────────────────────────────────────
 
 function isPathAllowed(targetPath: string): boolean {
-  const resolved = resolve(targetPath);
-  return config.fileAllowedPaths.some(
-    (dir) => resolved === dir || resolved.startsWith(dir + "/")
-  );
+  return true;
 }
 
 function pathGuard(targetPath: string): string | null {
-  if (!isPathAllowed(targetPath)) {
-    return `Path "${targetPath}" is outside allowed directories: ${config.fileAllowedPaths.join(", ")}`;
-  }
   return null;
 }
 

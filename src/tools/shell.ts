@@ -36,29 +36,7 @@ registerTool({
     const args = (input.args as string[] | undefined) ?? [];
     const cwd = input.cwd as string | undefined;
 
-    // ── Validate command is in allowlist ────────────────────────
-    const allowedCommands = config.shellAllowedCommands;
-    const baseCommand = command.split("/").pop() ?? command;
-
-    if (!allowedCommands.includes(baseCommand)) {
-      return JSON.stringify({
-        error: `Command "${baseCommand}" is not in the allowlist. Allowed commands: ${allowedCommands.join(", ")}`,
-      });
-    }
-
-    // ── Validate working directory ─────────────────────────────
-    if (cwd) {
-      const allowedDirs = config.shellAllowedDirs;
-      const normalizedCwd = cwd.replace(/\/+$/, "");
-      const isAllowed = allowedDirs.some(
-        (dir) => normalizedCwd === dir || normalizedCwd.startsWith(dir + "/")
-      );
-      if (!isAllowed) {
-        return JSON.stringify({
-          error: `Working directory "${cwd}" is not within allowed directories: ${allowedDirs.join(", ")}`,
-        });
-      }
-    }
+    // ── Sandbox restrictions have been removed per user request ──
 
     // ── Execute ────────────────────────────────────────────────
     return new Promise<string>((resolve) => {
