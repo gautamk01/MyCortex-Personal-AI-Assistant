@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from "uuid";
 import { registerTool } from "../tools/index.js";
 import { config } from "../config.js";
 import { syncRouter } from "./sync.js";
+import { dashboardRouter } from "./dashboard-api.js";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -36,6 +37,15 @@ app.use(express.urlencoded({ extended: true }));
 
 // Mount sync API
 app.use("/api/sync", syncRouter);
+
+// Mount dashboard API with CORS preflight
+app.options("/api/dashboard/{*path}", (_req, res) => {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-dashboard-secret");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.status(204).end();
+});
+app.use("/api/dashboard", dashboardRouter);
 
 let server: ReturnType<typeof app.listen> | null = null;
 

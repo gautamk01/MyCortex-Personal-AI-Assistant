@@ -89,6 +89,9 @@ export const config = {
   /** Secret token to authorize local<->production DB synchronization */
   syncSecret: process.env.SYNC_SECRET ?? "",
 
+  /** Secret token for Mission Control dashboard API */
+  dashboardSecret: process.env.DASHBOARD_SECRET ?? process.env.SYNC_SECRET ?? "",
+
   // ── External APIs ──────────────────────────────────────────
   /** Sarvam AI API Key */
   sarvamApiKey: process.env.SARVAM_API_KEY ?? "",
