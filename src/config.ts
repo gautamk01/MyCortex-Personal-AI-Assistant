@@ -50,6 +50,12 @@ export const config = {
   /** Kokoro voice ID */
   kokoroVoice: process.env.KOKORO_VOICE ?? "af_heart",
 
+  /** Local faster-whisper STT server URL */
+  localSttUrl: process.env.LOCAL_STT_URL ?? "http://127.0.0.1:8890",
+
+  /** WebSocket port for the voice agent */
+  voiceWsPort: Number(process.env.VOICE_WS_PORT) || 8891,
+
   // ── Shell Commands ─────────────────────────────────────────
   /** Allowlisted shell commands */
   shellAllowedCommands: csvList(process.env.SHELL_ALLOWED_COMMANDS, [

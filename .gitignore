@@ -17,6 +17,7 @@ data/
 
 # TTS server workspace
 tts-server/venv/
+stt-server/venv/
 
 # OS junk
 .DS_Store
@@ -25,6 +26,7 @@ Thumbs.db
 # Editor
 .vscode/
 .idea/
+.agent/
 *.swp
 *.swo
 

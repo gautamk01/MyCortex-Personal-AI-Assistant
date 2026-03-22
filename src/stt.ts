@@ -1,17 +1,27 @@
 import { config } from "./config.js";
 import axios from "axios";
 import FormData from "form-data";
+import { localSpeechToText } from "./voice/local-stt.js";
 
 /**
- * Convert audio to text using Sarvam AI STT mapping for both local and production.
+ * Convert audio to text.
+ * Tries local faster-whisper first (if available), then falls back to Sarvam AI.
  */
 export async function speechToText(
   audioBuffer: Buffer,
   mimeType: string = "audio/ogg",
   filename: string = "voice_message.ogg",
 ): Promise<string | null> {
+  // ── Try local STT first ──────────────────────────────────
+  if (config.localSttUrl) {
+    const localResult = await localSpeechToText(audioBuffer, mimeType, filename);
+    if (localResult) return localResult;
+    console.warn("⚠️  Local STT failed or unavailable, trying Sarvam AI fallback...");
+  }
+
+  // ── Fallback: Sarvam AI (cloud) ──────────────────────────
   if (!config.sarvamApiKey) {
-    console.error("❌ SARVAM_API_KEY is missing. Cannot transcribe audio.");
+    console.error("❌ No STT available. Local STT is down and SARVAM_API_KEY is missing.");
     return null;
   }
 

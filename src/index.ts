@@ -11,6 +11,7 @@ import { closeAllTerminals } from "./tools/terminal.js";
 import { initMemory } from "./memory/index.js";
 import { startHeartbeat, stopHeartbeat } from "./heartbeat.js";
 import { setReminderDispatch, stopAllReminders } from "./reminders.js";
+import { startVoiceServer, stopVoiceServer } from "./voice/voice-server.js";
 
 // ── Load tools before starting ─────────────────────────────────
 
@@ -61,6 +62,13 @@ startWebhookServer();
 // Heartbeat — daily LeetCode accountability check-in
 startHeartbeat();
 
+// Voice WebSocket server — JARVIS-like real-time voice agent
+if (process.env.NODE_ENV !== "production") {
+  startVoiceServer();
+} else {
+  console.log("ℹ️  Voice agent disabled in production mode");
+}
+
 // ── Startup ────────────────────────────────────────────────────
 
 console.log("───────────────────────────────────────────");
@@ -69,6 +77,7 @@ console.log(`   Model:    ${config.llmModel}`);
 console.log(`   Users:    ${config.allowedUserIds.length} whitelisted`);
 console.log(`   Max iter: ${config.maxAgentIterations}`);
 console.log(`   Webhook:  http://localhost:${config.webhookPort}`);
+console.log(`   Voice WS: ws://localhost:${config.voiceWsPort}`);
 console.log(`   Skills:   ${config.skillsDir}`);
 console.log("───────────────────────────────────────────");
 
@@ -80,6 +89,7 @@ async function shutdown() {
   stopAllTasks();
   stopAllReminders();
   stopHeartbeat();
+  stopVoiceServer();
   stopWebhookServer();
   await closeMCPBridge();
   // Lazy-imported browser — close if it was used

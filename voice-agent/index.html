@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gravity Claw — Voice Agent</title>
+  <meta name="description" content="JARVIS-like voice agent for Gravity Claw personal AI assistant">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header id="header">
+      <div class="header-left">
+        <span class="logo-icon">◆</span>
+        <h1>GRAVITY CLAW</h1>
+      </div>
+      <div class="header-right">
+        <div id="connection-status" class="status-badge disconnected">
+          <span class="status-dot"></span>
+          <span class="status-text">DISCONNECTED</span>
+        </div>
+        <div id="stt-status" class="status-badge hidden">
+          <span class="status-dot"></span>
+          <span class="status-text">STT</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Visualizer Area -->
+    <main id="main">
+      <!-- Background Grid -->
+      <div class="grid-bg"></div>
+
+      <!-- Central Orb -->
+      <div id="orb-container">
+        <canvas id="visualizer-canvas" width="400" height="400"></canvas>
+        <div id="orb" class="idle">
+          <div class="orb-ring ring-1"></div>
+          <div class="orb-ring ring-2"></div>
+          <div class="orb-ring ring-3"></div>
+          <div class="orb-core"></div>
+        </div>
+        <div id="state-label">READY</div>
+      </div>
+
+      <!-- Transcript Area -->
+      <div id="transcript-area">
+        <div id="user-transcript" class="transcript-line hidden">
+          <span class="transcript-label">YOU</span>
+          <span class="transcript-text"></span>
+        </div>
+        <div id="ai-response" class="transcript-line hidden">
+          <span class="transcript-label">CLAW</span>
+          <span class="transcript-text"></span>
+        </div>
+      </div>
+    </main>
+
+    <!-- Controls -->
+    <footer id="controls">
+      <div class="control-row">
+        <button id="wake-word-toggle" class="control-btn" title="Toggle 'Hey Claw' wake word">
+          <span class="btn-icon">🎙️</span>
+          <span class="btn-label">WAKE WORD</span>
+        </button>
+
+        <button id="talk-btn" class="talk-btn" title="Hold to talk (or press Space)">
+          <div class="talk-btn-inner">
+            <svg viewBox="0 0 24 24" class="mic-icon" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+              <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+              <line x1="12" y1="19" x2="12" y2="23"/>
+              <line x1="8" y1="23" x2="16" y2="23"/>
+            </svg>
+          </div>
+          <span class="talk-label">HOLD TO TALK</span>
+        </button>
+
+        <button id="settings-btn" class="control-btn" title="Settings">
+          <span class="btn-icon">⚙️</span>
+          <span class="btn-label">SETTINGS</span>
+        </button>
+      </div>
+
+      <div class="hint-text">
+        Press and hold <kbd>Space</kbd> or the mic button to talk — or enable "Hey Claw" wake word
+      </div>
+    </footer>
+
+    <!-- Settings Panel (hidden by default) -->
+    <div id="settings-panel" class="hidden">
+      <div class="settings-content">
+        <h2>⚙️ Settings</h2>
+        <div class="setting-row">
+          <label for="ws-url">WebSocket URL</label>
+          <input type="text" id="ws-url" value="ws://localhost:8891" />
+        </div>
+        <div class="setting-row">
+          <label for="wake-phrase">Wake Phrase</label>
+          <input type="text" id="wake-phrase" value="hey claw" />
+        </div>
+        <div class="setting-row">
+          <label for="vad-sensitivity">VAD Sensitivity</label>
+          <input type="range" id="vad-sensitivity" min="0" max="100" value="50" />
+        </div>
+        <div class="button-row">
+          <button id="settings-save" class="primary-btn">Save & Connect</button>
+          <button id="settings-close" class="secondary-btn">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
