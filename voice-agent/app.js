@@ -15,7 +15,7 @@
 const state = {
   ws: null,
   wsUrl: localStorage.getItem('wsUrl') || 'ws://localhost:8891',
-  wakePhrase: localStorage.getItem('wakePhrase') || 'hey claw',
+  wakePhrase: localStorage.getItem('wakePhrase') || 'hey leo',
   isConnected: false,
   isListening: false,
   isProcessing: false,
@@ -678,5 +678,5 @@ setInterval(() => {
 
 console.log('🚀 Gravity Claw Voice Agent initializing...');
 console.log('   Hold Space or click the mic button to talk');
-console.log('   Enable "Hey Claw" wake word for hands-free mode');
+console.log('   Enable "Hey Leo" wake word for hands-free mode');
 connect();

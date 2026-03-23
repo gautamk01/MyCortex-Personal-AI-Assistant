@@ -2,6 +2,7 @@ import { google, sheets_v4 } from "googleapis";
 import { config } from "./config.js";
 
 const LEETCODE_SHEET_TITLE = "LeetCode Log";
+const COMPANY_SHEET_TITLE = "Company Tracker";
 
 const LEETCODE_HEADERS = [
   "#",
@@ -11,6 +12,8 @@ const LEETCODE_HEADERS = [
   "Difficulty",
   "Topic",
   "Time Spent (mins)",
+  "Notes",
+  "Revision Date",
 ];
 
 type SheetsClient = ReturnType<typeof google.sheets>;
@@ -255,7 +258,8 @@ export async function logLeetCodeToSheet(
   difficulty: "Easy" | "Medium" | "Hard",
   topic: string,
   timeMinutes: number,
-  _notes = "",
+  notes = "",
+  revisionDate = "",
 ) {
   await ensureSheetTab(LEETCODE_SHEET_TITLE, LEETCODE_HEADERS);
 
@@ -266,11 +270,11 @@ export async function logLeetCodeToSheet(
 
   const response = await sheets.spreadsheets.values.append({
     spreadsheetId: config.googleSheetId,
-    range: `${quoteSheet(LEETCODE_SHEET_TITLE)}!A:G`,
+    range: `${quoteSheet(LEETCODE_SHEET_TITLE)}!A:I`,
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
-      values: [[serialNo, date, time, problemName, difficulty, topic, duration]],
+      values: [[serialNo, date, time, problemName, difficulty, topic, duration, notes, revisionDate]],
     },
   });
 
@@ -283,7 +287,7 @@ export async function getLeetCodeLogs(limit = 10) {
   const sheets = await getSheetsClient();
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.googleSheetId,
-    range: `${quoteSheet(LEETCODE_SHEET_TITLE)}!A:G`,
+    range: `${quoteSheet(LEETCODE_SHEET_TITLE)}!A:I`,
   });
 
   const rows = res.data.values || [];
@@ -304,6 +308,8 @@ export async function getLeetCodeLogs(limit = 10) {
       difficulty: row[4],
       topic: row[5],
       timeMinutes: row[6],
+      notes: row[7] || "",
+      revisionDate: row[8] || "",
     };
   });
 }
@@ -315,12 +321,14 @@ export async function updateLeetCodeLog(
     difficulty?: "Easy" | "Medium" | "Hard";
     topic?: string;
     timeMinutes?: number;
+    notes?: string;
+    revisionDate?: string;
   },
 ) {
   await ensureSheetTab(LEETCODE_SHEET_TITLE, LEETCODE_HEADERS);
 
   const sheets = await getSheetsClient();
-  const range = `${quoteSheet(LEETCODE_SHEET_TITLE)}!A${rowNumber}:G${rowNumber}`;
+  const range = `${quoteSheet(LEETCODE_SHEET_TITLE)}!A${rowNumber}:I${rowNumber}`;
   const res = await sheets.spreadsheets.values.get({
     spreadsheetId: config.googleSheetId,
     range,
@@ -339,6 +347,8 @@ export async function updateLeetCodeLog(
     updates.difficulty ?? existingRow[4],
     updates.topic ?? existingRow[5],
     updates.timeMinutes ?? existingRow[6],
+    updates.notes ?? existingRow[7] ?? "",
+    updates.revisionDate ?? existingRow[8] ?? "",
   ];
 
   await sheets.spreadsheets.values.update({
@@ -356,5 +366,141 @@ export async function updateLeetCodeLog(
 export async function deleteLeetCodeLog(rowNumber: number) {
   await ensureSheetTab(LEETCODE_SHEET_TITLE, LEETCODE_HEADERS);
   await deleteRowFromSheet(LEETCODE_SHEET_TITLE, rowNumber);
+  return true;
+}
+
+// ── Company / Job Tracker ──────────────────────────────────────
+
+const COMPANY_HEADERS = [
+  "#",
+  "Date",
+  "Company",
+  "Role",
+  "Status",
+  "Platform",
+  "Link",
+  "Notes",
+];
+
+export type CompanyStatus =
+  | "Interested"
+  | "Applied"
+  | "OA"
+  | "Interview"
+  | "Offer"
+  | "Rejected"
+  | "Withdrawn"
+  | "Accepted";
+
+export async function logCompanyToSheet(
+  company: string,
+  role: string,
+  status: CompanyStatus,
+  platform: string,
+  link = "",
+  notes = "",
+) {
+  await ensureSheetTab(COMPANY_SHEET_TITLE, COMPANY_HEADERS);
+
+  const sheets = await getSheetsClient();
+  const { date } = getISTDateTime();
+  const serialNo = await getNextSerialNo(COMPANY_SHEET_TITLE);
+
+  const response = await sheets.spreadsheets.values.append({
+    spreadsheetId: config.googleSheetId,
+    range: `${quoteSheet(COMPANY_SHEET_TITLE)}!A:H`,
+    valueInputOption: "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+    requestBody: {
+      values: [[serialNo, date, company, role, status, platform, link, notes]],
+    },
+  });
+
+  return response.data;
+}
+
+export async function getCompanyLogs(limit = 10) {
+  await ensureSheetTab(COMPANY_SHEET_TITLE, COMPANY_HEADERS);
+
+  const sheets = await getSheetsClient();
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.googleSheetId,
+    range: `${quoteSheet(COMPANY_SHEET_TITLE)}!A:H`,
+  });
+
+  const rows = res.data.values || [];
+  if (rows.length <= 1) return [];
+
+  const dataRows = rows.slice(1);
+  const recent = dataRows.slice(-limit);
+
+  return recent.map((row, index) => {
+    const originalIndex = dataRows.length - recent.length + index;
+    const rowNumber = originalIndex + 2;
+    return {
+      rowNumber,
+      serialNo: row[0],
+      date: row[1],
+      company: row[2],
+      role: row[3],
+      status: row[4],
+      platform: row[5],
+      link: row[6],
+      notes: row[7],
+    };
+  });
+}
+
+export async function updateCompanyLog(
+  rowNumber: number,
+  updates: {
+    company?: string;
+    role?: string;
+    status?: CompanyStatus;
+    platform?: string;
+    link?: string;
+    notes?: string;
+  },
+) {
+  await ensureSheetTab(COMPANY_SHEET_TITLE, COMPANY_HEADERS);
+
+  const sheets = await getSheetsClient();
+  const range = `${quoteSheet(COMPANY_SHEET_TITLE)}!A${rowNumber}:H${rowNumber}`;
+  const res = await sheets.spreadsheets.values.get({
+    spreadsheetId: config.googleSheetId,
+    range,
+  });
+
+  const existingRow = res.data.values?.[0];
+  if (!existingRow) {
+    throw new Error(`Row ${rowNumber} not found or empty.`);
+  }
+
+  const newRow = [
+    existingRow[0],
+    existingRow[1],
+    updates.company ?? existingRow[2],
+    updates.role ?? existingRow[3],
+    updates.status ?? existingRow[4],
+    updates.platform ?? existingRow[5],
+    updates.link ?? existingRow[6],
+    updates.notes ?? existingRow[7],
+  ];
+
+  await sheets.spreadsheets.values.update({
+    spreadsheetId: config.googleSheetId,
+    range,
+    valueInputOption: "USER_ENTERED",
+    requestBody: {
+      values: [newRow],
+    },
+  });
+
+  return true;
+}
+
+export async function deleteCompanyLog(rowNumber: number) {
+  await ensureSheetTab(COMPANY_SHEET_TITLE, COMPANY_HEADERS);
+  await deleteRowFromSheet(COMPANY_SHEET_TITLE, rowNumber);
   return true;
 }

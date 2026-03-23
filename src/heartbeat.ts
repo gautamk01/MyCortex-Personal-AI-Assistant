@@ -2,6 +2,8 @@ import cron from "node-cron";
 import { chat, type ChatCompletionMessageParam } from "./llm.js";
 import { config } from "./config.js";
 import { sendTelegramText } from "./bot.js";
+import { textToSpeech } from "./tts.js";
+import { broadcastVoiceMessage } from "./voice/voice-server.js";
 import { getHistory } from "./agent.js";
 import {
   buildHourlySnapshot,
@@ -286,6 +288,12 @@ async function buildEveningMessage(chatId: number): Promise<string> {
 
 async function sendHeartbeatMessage(chatId: number, text: string): Promise<void> {
   await sendTelegramText(chatId, text);
+  try {
+    const audio = await textToSpeech(text);
+    broadcastVoiceMessage(text, audio);
+  } catch (err) {
+    console.error("Failed to speak heartbeat:", err);
+  }
 }
 
 function chooseTheme(snapshot: Awaited<ReturnType<typeof buildHourlySnapshot>>): {

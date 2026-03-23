@@ -7,6 +7,11 @@ import {
   logLeetCodeToSheet,
   updateLeetCodeLog,
   getISTDateTime,
+  logCompanyToSheet,
+  getCompanyLogs,
+  updateCompanyLog,
+  deleteCompanyLog,
+  type CompanyStatus,
 } from "../sheets.js";
 import { getUserStats, addExp } from "../memory/sqlite.js";
 import {
@@ -94,7 +99,8 @@ registerTool({
       difficulty: { type: "string", enum: ["Easy", "Medium", "Hard"], description: "Difficulty level" },
       topic: { type: "string", description: "Topic/category (e.g. arrays, DP, graphs)" },
       timeMinutes: { type: "number", description: "Time taken in minutes" },
-      notes: { type: "string", description: "Optional notes about the solution" },
+      notes: { type: "string", description: "Optional notes about the approach, key insight, or mistakes" },
+      revisionDate: { type: "string", description: "If revision is needed, the date to revisit in YYYY-MM-DD format. Leave empty if no revision needed." },
     },
     required: ["problemName", "difficulty", "topic", "timeMinutes"],
   },
@@ -105,7 +111,8 @@ registerTool({
       input.difficulty as "Easy" | "Medium" | "Hard",
       input.topic as string,
       input.timeMinutes as number,
-      (input.notes as string) || ""
+      (input.notes as string) || "",
+      (input.revisionDate as string) || "",
     );
 
     const expMap: Record<string, number> = { Easy: 10, Medium: 20, Hard: 30 };
@@ -113,6 +120,7 @@ registerTool({
 
     const result = addExp(chatId, exp, `Solved LeetCode: ${input.problemName}`);
     let msg = `📊 Logged "${input.problemName}" to Sheets! +${exp} EXP (Total: ${result.newTotal}).`;
+    if (input.revisionDate) msg += ` 📅 Revision scheduled: ${input.revisionDate}.`;
     if (result.levelUp) msg += ` 🎉 LEVEL UP → Level ${result.newLevel}!`;
     return msg;
   },
@@ -147,6 +155,8 @@ registerTool({
       difficulty: { type: "string", enum: ["Easy", "Medium", "Hard"] },
       topic: { type: "string" },
       timeMinutes: { type: "number" },
+      notes: { type: "string", description: "Notes about the approach, key insight, or mistakes" },
+      revisionDate: { type: "string", description: "Revision date in YYYY-MM-DD format. Set to empty string to clear." },
     },
     required: ["rowNumber"],
   },
@@ -157,6 +167,8 @@ registerTool({
       difficulty: input.difficulty as "Easy" | "Medium" | "Hard",
       topic: input.topic as string,
       timeMinutes: input.timeMinutes as number,
+      notes: input.notes as string,
+      revisionDate: input.revisionDate as string,
     });
     return `✅ Successfully updated row ${rowNumber} in Google Sheets.`;
   },
@@ -179,6 +191,107 @@ registerTool({
   },
 });
 
+// ── Company / Job Tracker Tools ────────────────────────────────
+
+registerTool({
+  name: "log_company",
+  description: "Log a company/job application to the Company Tracker tab in Google Sheets. Use this when the user mentions applying to a company, finding a job listing, or wants to track a company.",
+  parameters: {
+    type: "object",
+    properties: {
+      company: { type: "string", description: "Company name" },
+      role: { type: "string", description: "Job title / role" },
+      status: {
+        type: "string",
+        enum: ["Interested", "Applied", "OA", "Interview", "Offer", "Rejected", "Withdrawn", "Accepted"],
+        description: "Current application status",
+      },
+      platform: { type: "string", description: "Where the job was found (e.g. LinkedIn, Naukri, company website, referral)" },
+      link: { type: "string", description: "URL of the job posting (optional)" },
+      notes: { type: "string", description: "Optional notes" },
+    },
+    required: ["company", "role", "status", "platform"],
+  },
+  execute: async (input) => {
+    await logCompanyToSheet(
+      input.company as string,
+      input.role as string,
+      input.status as CompanyStatus,
+      input.platform as string,
+      (input.link as string) || "",
+      (input.notes as string) || "",
+    );
+    return `📋 Logged "${input.company} — ${input.role}" (${input.status}) to Company Tracker!`;
+  },
+});
+
+registerTool({
+  name: "get_company_logs",
+  description: "Fetches recent company/job application logs from Google Sheets (returns rowNumber and details).",
+  parameters: {
+    type: "object",
+    properties: {
+      limit: { type: "number", description: "Number of recent entries to fetch (default 10)" },
+    },
+    required: [],
+  },
+  execute: async (input) => {
+    const limit = (input.limit as number) || 10;
+    const logs = await getCompanyLogs(limit);
+    if (logs.length === 0) return "No company logs found in the sheet.";
+    return JSON.stringify(logs, null, 2);
+  },
+});
+
+registerTool({
+  name: "update_company_log",
+  description: "Updates an existing company/job application row in Google Sheets.",
+  parameters: {
+    type: "object",
+    properties: {
+      rowNumber: { type: "number", description: "The row number to update (get from get_company_logs)" },
+      company: { type: "string" },
+      role: { type: "string" },
+      status: {
+        type: "string",
+        enum: ["Interested", "Applied", "OA", "Interview", "Offer", "Rejected", "Withdrawn", "Accepted"],
+      },
+      platform: { type: "string" },
+      link: { type: "string" },
+      notes: { type: "string" },
+    },
+    required: ["rowNumber"],
+  },
+  execute: async (input) => {
+    const rowNumber = input.rowNumber as number;
+    await updateCompanyLog(rowNumber, {
+      company: input.company as string,
+      role: input.role as string,
+      status: input.status as CompanyStatus,
+      platform: input.platform as string,
+      link: input.link as string,
+      notes: input.notes as string,
+    });
+    return `✅ Updated company log row ${rowNumber} in Google Sheets.`;
+  },
+});
+
+registerTool({
+  name: "delete_company_log",
+  description: "Deletes a company/job application row from Google Sheets.",
+  parameters: {
+    type: "object",
+    properties: {
+      rowNumber: { type: "number", description: "The row number to delete (get from get_company_logs)" },
+    },
+    required: ["rowNumber"],
+  },
+  execute: async (input) => {
+    const rowNumber = input.rowNumber as number;
+    await deleteCompanyLog(rowNumber);
+    return `🗑️ Deleted company log row ${rowNumber} from Google Sheets.`;
+  },
+});
 
 // ── Local SQLite Tools (Work & Life Logs) ──────────────────────
 

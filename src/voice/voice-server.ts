@@ -210,3 +210,21 @@ export function stopVoiceServer(): void {
   }
   console.log("🎤 Voice WebSocket server stopped");
 }
+
+export function broadcastVoiceMessage(text: string, audioBuffer: Buffer | null): void {
+  if (!wss) return;
+
+  for (const client of wss.clients) {
+    if (client.readyState === WebSocket.OPEN) {
+      if (text) {
+        sendJson(client, { type: "response", text: text });
+      }
+      if (audioBuffer) {
+        sendJson(client, { type: "status", status: "speaking" });
+        client.send(audioBuffer);
+        sendJson(client, { type: "status", status: "ready" });
+      }
+    }
+  }
+}
+
