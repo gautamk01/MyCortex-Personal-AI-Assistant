@@ -181,7 +181,7 @@ export function getSystemPrompt(interfaceMode: "gui" | "terminal" = "terminal"):
     dateStyle: "full",
     timeStyle: "short",
   }).format(now);
-  const timeContext = `[System clock — ${istTime} IST. Do NOT announce this unless the user asks for the time or it is directly relevant to the conversation (e.g. discussing schedules, deadlines, or reminders).]\n\n`;
+  const timeContext = `[System clock — ${istTime} IST. Always use this as your source of truth for the current time. Weave it naturally into your reply whenever schedules, deadlines, reminders, daily plans, time blocks, or "what should I do now" questions are involved. Do not announce the time unprompted for unrelated topics.]\n\n`;
 
   let modeInstructions = "";
   if (interfaceMode === "gui") {
