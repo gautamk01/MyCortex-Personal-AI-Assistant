@@ -367,7 +367,11 @@ function clearAudioQueue() {
   }
 }
 
+let _queueProcessing = false;
 async function playNextFromQueue() {
+  if (_queueProcessing) return;
+  _queueProcessing = true;
+
   if (state.audioQueue.length === 0) {
     state.isPlayingQueued = false;
     if (!state.isProcessing) {
@@ -375,6 +379,7 @@ async function playNextFromQueue() {
       setOrbState('idle');
       if (!state.isListening) stopVisualizer();
     }
+    _queueProcessing = false;
     return;
   }
 
@@ -407,9 +412,11 @@ async function playNextFromQueue() {
     };
 
     source.start();
+    _queueProcessing = false;
     console.log(`🔊 Playing queued chunk: ${audioBuffer.duration.toFixed(1)}s`);
   } catch (err) {
     console.error('Audio queue playback error:', err);
+    _queueProcessing = false;
     playNextFromQueue(); // Skip bad chunk
   }
 }

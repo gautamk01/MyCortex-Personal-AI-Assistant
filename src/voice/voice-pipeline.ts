@@ -92,7 +92,6 @@ export async function runVoicePipeline(
 
         // Use Local TTS (Kokoro)
         let audio: Buffer | null = null;
-        let isElevenLabs = false;
         try {
           audio = await textToSpeech(nextThought);
         } catch (err) {
@@ -104,12 +103,9 @@ export async function runVoicePipeline(
           if (onProgress) onProgress(nextThought);
           onFillerAudio(audio);
           lastFillerSentAt = Date.now();
-          
-          // Accurate duration calculation based on codec bitrate
-          // ElevenLabs: 32kbps MP3 (~4000 bytes/sec)
-          // Kokoro: 24kHz 16-bit Mono WAV (~48000 bytes/sec)
-          const bytesPerSec = isElevenLabs ? 4000 : 48000;
-          activeAudioDurationMs = Math.max(1000, (audio.length / bytesPerSec) * 1000);
+
+          // Kokoro: 24kHz 16-bit Mono WAV (~48000 bytes/sec audio data, minus 44-byte WAV header)
+          activeAudioDurationMs = Math.max(1000, ((audio.length - 44) / 48000) * 1000);
           
           // Wait for the audio to finish + 300ms natural gap
           const waitMs = activeAudioDurationMs + 300;

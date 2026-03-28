@@ -36,6 +36,7 @@ export async function generateToolFiller(
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.groqApiKey}`,
       },
+      signal: AbortSignal.timeout(5_000),
       body: JSON.stringify({
         model: GROQ_FILLER_MODEL,
         messages: [
@@ -83,6 +84,7 @@ export async function generateResultFiller(
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.groqApiKey}`,
       },
+      signal: AbortSignal.timeout(5_000),
       body: JSON.stringify({
         model: GROQ_FILLER_MODEL,
         messages: [
@@ -147,6 +149,7 @@ ${contextStr}`;
         "Content-Type": "application/json",
         Authorization: `Bearer ${config.groqApiKey}`,
       },
+      signal: AbortSignal.timeout(5_000),
       body: JSON.stringify({
         model: GROQ_FAST_MODEL, // Use 8B for maximum speed (~200ms)
         messages: [

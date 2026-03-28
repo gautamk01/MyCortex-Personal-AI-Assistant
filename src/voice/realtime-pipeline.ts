@@ -72,8 +72,8 @@ export async function runRealtimePipeline(
       if (audio && !fillersCancelled && !signal?.aborted) {
         sendJson({ type: "rt_status", status: "speaking" });
         sendAudio(audio);
-        // Wait for audio to finish: Kokoro WAV is ~48000 bytes/sec at 24kHz 16-bit
-        const durationMs = Math.max(1000, (audio.length / 48000) * 1000);
+        // Wait for audio to finish: Kokoro WAV is ~48000 bytes/sec at 24kHz 16-bit (minus 44-byte header)
+        const durationMs = Math.max(1000, ((audio.length - 44) / 48000) * 1000);
         await new Promise((r) => setTimeout(r, durationMs + 300));
       } else {
         await new Promise((r) => setTimeout(r, 500));
@@ -149,7 +149,7 @@ export async function runRealtimePipeline(
 
         // Wait for this sentence to finish playing before sending next
         // (client plays sequentially via audio queue)
-        const durationMs = (audio.length / 48000) * 1000;
+        const durationMs = ((audio.length - 44) / 48000) * 1000;
         await new Promise((r) => setTimeout(r, Math.max(200, durationMs)));
       }
     } else if (event.type === "tool_start") {

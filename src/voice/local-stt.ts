@@ -24,6 +24,7 @@ export async function localSpeechToText(
         headers: {
           "api-subscription-key": config.sarvamApiKey,
         },
+        signal: AbortSignal.timeout(15_000),
         body: formData,
       });
 
@@ -56,6 +57,7 @@ export async function localSpeechToText(
 
     const res = await fetch(`${config.localSttUrl}/transcribe`, {
       method: "POST",
+      signal: AbortSignal.timeout(15_000),
       body: formData,
     });
 

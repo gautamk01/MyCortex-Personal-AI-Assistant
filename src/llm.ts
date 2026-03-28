@@ -126,7 +126,7 @@ export async function* chatStream(
           toolCallMap[idx] = { id: "", name: "", arguments: "" };
         }
         if (tc.id) toolCallMap[idx].id = tc.id;
-        if (tc.function?.name) toolCallMap[idx].name += tc.function.name;
+        if (tc.function?.name) toolCallMap[idx].name = tc.function.name;
         if (tc.function?.arguments) toolCallMap[idx].arguments += tc.function.arguments;
       }
     }

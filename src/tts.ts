@@ -25,6 +25,7 @@ export async function textToSpeech(text: string): Promise<Buffer | null> {
           "Content-Type": "application/json",
           "api-subscription-key": config.sarvamApiKey
         },
+        signal: AbortSignal.timeout(10_000),
         body: JSON.stringify({
           inputs: [trimmed],
           target_language_code: "en-IN",
@@ -58,6 +59,7 @@ export async function textToSpeech(text: string): Promise<Buffer | null> {
     const response = await fetch(`${config.kokoroUrl}/tts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      signal: AbortSignal.timeout(10_000),
       body: JSON.stringify({
         text: trimmed,
         voice: config.kokoroVoice,
