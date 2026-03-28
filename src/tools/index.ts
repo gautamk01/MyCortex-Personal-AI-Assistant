@@ -62,7 +62,9 @@ export async function loadTools(): Promise<void> {
   await import("./get-current-time.js");
   await import("./shell.js");
   await import("./file-ops.js");
-  await import("./browser.js");
+  // await import("./browser.js"); // Disabled — using BrowserOS MCP instead
+  await import("./browseros.js");  // Lazy on-demand BrowserOS integration (low-level MCP)
+  await import("./browse-sdk.js"); // High-level NL browser automation via Agent SDK
   await import("./web-search.js");
   await import("./terminal.js");
   await import("./desktop.js");

@@ -161,6 +161,19 @@ export const config = {
 
   /** Embedding dimensions (must match the model) */
   embeddingDims: Number(process.env.EMBEDDING_DIMS) || 1536,
+
+  // ── Voice Mode ────────────────────────────────────────────
+  /** Voice pipeline mode: "realtime" (streaming) or "turn-based" (batch) */
+  voiceMode: (process.env.VOICE_MODE ?? "realtime") as "realtime" | "turn-based",
+
+  /** Silence duration (ms) before VAD considers speech ended */
+  vadSilenceMs: Number(process.env.VAD_SILENCE_MS) || 2500,
+
+  /** RMS energy threshold for VAD speech detection (0-32767) */
+  vadEnergyThreshold: Number(process.env.VAD_ENERGY_THRESHOLD) || 300,
+
+  /** Delay (ms) between VAD speech-end detection and pipeline start — gives user visual feedback */
+  vadProcessDelayMs: Number(process.env.VAD_PROCESS_DELAY_MS) || 400,
 } as const;
 
 // Sanity check

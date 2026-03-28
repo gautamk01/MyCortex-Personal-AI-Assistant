@@ -8,6 +8,7 @@ import {
   type AgentProgressReporter,
 } from "./agent.js";
 import { textToSpeech } from "./tts.js";
+import { describeToolAction } from "./tools/describe.js";
 import { compactHistory } from "./memory/context-pruner.js";
 import {
   getReminderDueLabel,
@@ -641,10 +642,38 @@ async function createProgressController(
 
   scheduleSlowUpdate();
 
+  const toolLog: string[] = [];
+  let lastToolEditAt = 0;
+
   return {
     reporter: {
       update: async (phase: AgentProgressPhase | string) => {
-        await setLabel(getProgressLabel(phase as AgentProgressPhase));
+        const phaseStr = String(phase);
+
+        // Tool call: extract name + args → rich description
+        const toolCallMatch = phaseStr.match(/^Tool call: ([a-zA-Z0-9_]+)\((.*)\)$/s);
+        if (toolCallMatch) {
+          const [, toolName, toolArgs] = toolCallMatch;
+          toolLog.push(describeToolAction(toolName, toolArgs || ""));
+          const now = Date.now();
+          if (now - lastToolEditAt >= 1500) {
+            lastToolEditAt = now;
+            await setLabel(toolLog.join("\n"));
+          }
+          scheduleSlowUpdate();
+          return;
+        }
+
+        // Tool result: skip edit (next tool_call or phase will update)
+        if (phaseStr.startsWith("Tool result: ")) {
+          scheduleSlowUpdate();
+          return;
+        }
+
+        // Standard phases — show with accumulated tool log
+        const label = getProgressLabel(phase as AgentProgressPhase);
+        const full = toolLog.length > 0 ? `${label}\n\n${toolLog.join("\n")}` : label;
+        await setLabel(full);
         scheduleSlowUpdate();
       },
     },

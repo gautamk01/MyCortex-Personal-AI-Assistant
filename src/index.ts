@@ -92,10 +92,15 @@ async function shutdown() {
   stopVoiceServer();
   stopWebhookServer();
   await closeMCPBridge();
-  // Lazy-imported browser — close if it was used
+  // Close BrowserOS connections — SDK agent first (sends session-end HTTP),
+  // then MCP transport (lower-level connection)
   try {
-    const { closeBrowser } = await import("./tools/browser.js");
-    await closeBrowser();
+    const { closeSDKAgent } = await import("./tools/browse-sdk.js");
+    await closeSDKAgent();
+  } catch { /* not loaded */ }
+  try {
+    const { closeBrowserOS } = await import("./tools/browseros.js");
+    await closeBrowserOS();
   } catch { /* not loaded */ }
   closeAllTerminals();
   process.exit(0);

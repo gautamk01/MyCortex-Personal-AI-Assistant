@@ -11,7 +11,9 @@ export async function localSpeechToText(
 ): Promise<string | null> {
   
   // ── Sarvam AI Server (Primary) ──────────────────────────────────
-  if (config.sarvamApiKey) {
+  // Skip Sarvam for very short buffers (< 0.5s of audio incl. WAV header) — it rejects them with 400
+  const MIN_SARVAM_BYTES = 16044; // 44-byte WAV header + 16000 bytes (0.5s at 16kHz 16-bit mono)
+  if (config.sarvamApiKey && audioBuffer.length >= MIN_SARVAM_BYTES) {
     try {
       const formData = new FormData();
       const blob = new Blob([new Uint8Array(audioBuffer)], { type: mimeType });

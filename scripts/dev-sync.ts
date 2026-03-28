@@ -131,7 +131,10 @@ async function downloadDatabase() {
       testDb.close();
       console.log(`   📋 Tables found: ${tables.map(t => t.name).join(", ")}`);
     } catch (err) {
-      console.error("⚠️  Downloaded DB may not be a valid SQLite database:", err);
+      console.warn("⚠️  Downloaded DB is corrupt. Deleting so a fresh DB is created on startup.");
+      try { unlinkSync(DB_PATH); } catch {}
+      try { unlinkSync(DB_PATH + "-wal"); } catch {}
+      try { unlinkSync(DB_PATH + "-shm"); } catch {}
     }
   }
 }

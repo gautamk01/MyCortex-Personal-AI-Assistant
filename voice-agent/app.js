@@ -2,12 +2,9 @@
  * Gravity Claw — JARVIS Voice Agent
  * Browser-side JavaScript for real-time voice interaction.
  *
- * Features:
- *   - Push-to-talk (hold Space or mic button)
- *   - "Hey Claw" wake word detection (via Web Speech API)
- *   - WebSocket communication with the voice server
- *   - Audio visualizer (Canvas)
- *   - TTS audio playback
+ * Supports two modes (set by server on connect):
+ *   realtime   — AudioWorklet streams PCM16 continuously; server does VAD; audio plays in queue
+ *   turn-based — Push-to-talk; sends complete audio blobs; existing behavior
  */
 
 // ── State ────────────────────────────────────────────────────
@@ -16,13 +13,19 @@ const state = {
   ws: null,
   wsUrl: localStorage.getItem('wsUrl') || 'ws://localhost:8891',
   wakePhrase: localStorage.getItem('wakePhrase') || 'hey leo',
+  mode: 'realtime',           // Set by server on connect
   isConnected: false,
   isListening: false,
   isProcessing: false,
   isSpeaking: false,
-  wakeWordEnabled: false,
+  wakeWordEnabled: true,
+  // Turn-based recording
   mediaRecorder: null,
   audioChunks: [],
+  // Realtime streaming
+  audioWorkletNode: null,
+  workletReady: false,
+  // Audio context & visualizer
   audioContext: null,
   analyser: null,
   micStream: null,
@@ -30,6 +33,9 @@ const state = {
   animationFrame: null,
   reconnectTimer: null,
   reconnectAttempts: 0,
+  // Audio playback queue (realtime mode — sentences play sequentially)
+  audioQueue: [],
+  isPlayingQueued: false,
   currentAudioSource: null,
 };
 
@@ -59,14 +65,13 @@ const ctx = canvas.getContext('2d');
 // ── WebSocket Connection ─────────────────────────────────────
 
 function connect() {
-  // Clear any pending reconnect
   if (state.reconnectTimer) {
     clearTimeout(state.reconnectTimer);
     state.reconnectTimer = null;
   }
 
   if (state.ws) {
-    state.ws.onclose = null; // Prevent triggering reconnect
+    state.ws.onclose = null;
     state.ws.close();
     state.ws = null;
   }
@@ -80,7 +85,6 @@ function connect() {
       state.isConnected = true;
       state.reconnectAttempts = 0;
       updateConnectionStatus('connected');
-      // Send config with the first user ID
       state.ws.send(JSON.stringify({ type: 'config', chatId: 0 }));
       console.log('✅ Connected to voice server');
     };
@@ -88,24 +92,20 @@ function connect() {
     state.ws.onmessage = (event) => {
       if (typeof event.data === 'string') {
         const msg = JSON.parse(event.data);
-        console.log('📩 Message:', msg);
         handleJsonMessage(msg);
       } else {
-        // Binary data — TTS audio
-        console.log(`🔊 Received audio: ${event.data.byteLength} bytes`);
-        handleAudioResponse(event.data);
+        // Binary data — TTS audio chunk
+        handleAudioChunk(event.data);
       }
     };
 
     state.ws.onclose = (event) => {
       state.isConnected = false;
       updateConnectionStatus('disconnected');
-      console.log(`❌ Disconnected (code: ${event.code}, reason: ${event.reason})`);
-      
-      // Exponential backoff reconnect (max 30 seconds)
+      stopRealtimeStreaming();
+      console.log(`❌ Disconnected (code: ${event.code})`);
       state.reconnectAttempts++;
       const delay = Math.min(3000 * Math.pow(1.5, state.reconnectAttempts - 1), 30000);
-      console.log(`🔄 Reconnecting in ${(delay / 1000).toFixed(1)}s (attempt ${state.reconnectAttempts})...`);
       state.reconnectTimer = setTimeout(connect, delay);
     };
 
@@ -121,7 +121,22 @@ function connect() {
 }
 
 function handleJsonMessage(msg) {
+  console.log('📩 Message:', msg);
   switch (msg.type) {
+    case 'mode':
+      state.mode = msg.mode;
+      console.log(`🎙️ Voice mode: ${state.mode}`);
+      if (state.mode === 'realtime') {
+        startRealtimeStreaming();
+        updateTalkBtnLabel();
+        updateHintText();
+        if (state.wakeWordEnabled) {
+          stopWakeWordDetection();
+          startWakeWordDetection();
+        }
+        wakeWordToggle.classList.toggle('active', state.wakeWordEnabled);
+      }
+      break;
     case 'status':
       handleStatusChange(msg.status);
       break;
@@ -134,6 +149,41 @@ function handleJsonMessage(msg) {
     case 'response':
       showAIResponse(msg.text);
       break;
+    // ── Realtime-specific messages ──
+    case 'rt_status':
+      handleRtStatus(msg.status);
+      break;
+    case 'rt_transcript':
+      if (msg.role === 'user') showUserTranscript(msg.text);
+      if (msg.role === 'assistant') showAIResponse(msg.text);
+      break;
+    case 'rt_subtitle':
+      // Live captions: accumulate sentences as AI speaks
+      aiResponse.classList.remove('hidden');
+      aiResponseText.textContent += (aiResponseText.textContent ? ' ' : '') + msg.text;
+      break;
+    case 'rt_clear_audio':
+      // Flush filler audio from queue before real response starts
+      clearAudioQueue();
+      break;
+    case 'rt_tool':
+      showProgress(msg.detail || `${msg.status === 'calling' ? '⚙️' : '✅'} ${msg.name}`);
+      break;
+    case 'rt_interrupted':
+      clearAudioQueue();
+      setOrbState('listening');
+      break;
+    case 'vad':
+      if (msg.speaking) {
+        clearAudioQueue();   // Stop any remaining audio from previous response
+        clearTranscripts();
+        setOrbState('listening');
+        startVisualizer();
+      } else {
+        setOrbState('processing');
+        stopVisualizer();
+      }
+      break;
     case 'error':
       console.error('Server error:', msg.message);
       showAIResponse(`⚠️ ${msg.message}`);
@@ -145,13 +195,12 @@ function handleJsonMessage(msg) {
 }
 
 function handleStatusChange(status) {
-  console.log(`📡 Status: ${status}`);
   switch (status) {
     case 'connected':
     case 'ready':
       state.isProcessing = false;
       state.isSpeaking = false;
-      setOrbState('idle');
+      if (!state.audioQueue.length && !state.isPlayingQueued) setOrbState('idle');
       if (status === 'ready') {
         sttStatus.classList.remove('hidden');
         sttStatus.classList.add('connected');
@@ -175,6 +224,29 @@ function handleStatusChange(status) {
   }
 }
 
+function handleRtStatus(status) {
+  switch (status) {
+    case 'thinking':
+      state.isProcessing = true;
+      setOrbState('processing');
+      break;
+    case 'speaking':
+      state.isSpeaking = true;
+      setOrbState('speaking');
+      break;
+    case 'ready':
+      state.isProcessing = false;
+      if (!state.isPlayingQueued) {
+        state.isSpeaking = false;
+        setOrbState('idle');
+      }
+      break;
+    case 'listening':
+      setOrbState('listening');
+      break;
+  }
+}
+
 // ── UI Updates ───────────────────────────────────────────────
 
 function updateConnectionStatus(status) {
@@ -185,12 +257,29 @@ function updateConnectionStatus(status) {
 function setOrbState(orbState) {
   orb.className = orbState;
   const labels = {
-    idle: 'READY',
+    idle: state.mode === 'realtime' ? 'ALWAYS ON' : 'READY',
     listening: 'LISTENING',
     processing: 'THINKING',
     speaking: 'SPEAKING',
   };
   stateLabel.textContent = labels[orbState] || orbState.toUpperCase();
+}
+
+function updateHintText() {
+  const hint = $('#hint-text');
+  if (!hint) return;
+  if (state.mode === 'realtime') {
+    hint.textContent = 'Say "Hey Leo" to interrupt — or press Space to barge in';
+  } else {
+    hint.textContent = 'Press and hold Space or the mic button to talk — or enable "Hey Leo" wake word';
+  }
+}
+
+function updateTalkBtnLabel() {
+  const label = talkBtn.querySelector('.talk-label');
+  if (label) {
+    label.textContent = state.mode === 'realtime' ? 'ALWAYS LISTENING' : 'HOLD TO TALK';
+  }
 }
 
 function showUserTranscript(text) {
@@ -199,9 +288,7 @@ function showUserTranscript(text) {
 }
 
 function showProgress(text) {
-  if (state.isProcessing && !userTranscript.classList.contains('hidden')) {
-    stateLabel.textContent = text.toUpperCase();
-  }
+  stateLabel.textContent = text.slice(0, 50);
 }
 
 function showAIResponse(text) {
@@ -216,12 +303,184 @@ function clearTranscripts() {
   aiResponseText.textContent = '';
 }
 
-// ── Audio Recording ──────────────────────────────────────────
+// ── Realtime Streaming (AudioWorklet + continuous PCM16) ─────
+
+async function startRealtimeStreaming() {
+  if (state.audioWorkletNode) return; // Already started
+
+  try {
+    const stream = await getOrCreateMicStream();
+    const audioCtx = state.audioContext;
+
+    // Register the AudioWorklet module
+    await audioCtx.audioWorklet.addModule('pcm-processor.js');
+
+    const workletNode = new AudioWorkletNode(audioCtx, 'pcm-processor');
+
+    workletNode.port.onmessage = (event) => {
+      // PCM16 frame ready — send to server for VAD processing
+      if (state.ws && state.ws.readyState === WebSocket.OPEN && state.isConnected) {
+        state.ws.send(event.data); // ArrayBuffer of Int16 PCM
+      }
+    };
+
+    // Connect: mic → worklet (capture only, no output)
+    const micSource = audioCtx.createMediaStreamSource(stream);
+    micSource.connect(workletNode);
+    micSource.connect(state.analyser); // Feed analyser so visualizer reacts to mic input
+    // Don't connect worklet to destination (we don't want to hear ourselves)
+
+    state.audioWorkletNode = workletNode;
+    state.workletReady = true;
+    console.log('🎙️ Realtime PCM16 streaming started');
+    setOrbState('idle');
+  } catch (err) {
+    console.error('Failed to start realtime streaming:', err);
+    showAIResponse(`⚠️ Microphone error: ${err.message}`);
+  }
+}
+
+function stopRealtimeStreaming() {
+  if (state.audioWorkletNode) {
+    state.audioWorkletNode.disconnect();
+    state.audioWorkletNode = null;
+    state.workletReady = false;
+  }
+}
+
+// ── Audio Queue (Realtime Mode — sequential sentence playback) ─
+
+function clearAudioQueue() {
+  state.audioQueue = [];
+  state.isPlayingQueued = false;
+  if (state.currentAudioSource) {
+    try {
+      state.currentAudioSource.onended = null;
+      state.currentAudioSource.stop();
+    } catch { /* already stopped */ }
+    state.currentAudioSource = null;
+  }
+  if (!state.isListening) {
+    state.isSpeaking = false;
+    setOrbState('idle');
+    stopVisualizer();
+  }
+}
+
+async function playNextFromQueue() {
+  if (state.audioQueue.length === 0) {
+    state.isPlayingQueued = false;
+    if (!state.isProcessing) {
+      state.isSpeaking = false;
+      setOrbState('idle');
+      if (!state.isListening) stopVisualizer();
+    }
+    return;
+  }
+
+  state.isPlayingQueued = true;
+  const nextBuffer = state.audioQueue.shift();
+
+  try {
+    if (!state.audioContext) state.audioContext = new AudioContext();
+    if (state.audioContext.state === 'suspended') await state.audioContext.resume();
+
+    const audioBuffer = await state.audioContext.decodeAudioData(nextBuffer.slice(0));
+    const source = state.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+
+    if (!state.analyser) {
+      state.analyser = state.audioContext.createAnalyser();
+      state.analyser.fftSize = 256;
+    }
+    source.connect(state.analyser);
+    source.connect(state.audioContext.destination);
+
+    state.currentAudioSource = source;
+    state.isSpeaking = true;
+    setOrbState('speaking');
+    startVisualizer();
+
+    source.onended = () => {
+      if (state.currentAudioSource === source) state.currentAudioSource = null;
+      playNextFromQueue();
+    };
+
+    source.start();
+    console.log(`🔊 Playing queued chunk: ${audioBuffer.duration.toFixed(1)}s`);
+  } catch (err) {
+    console.error('Audio queue playback error:', err);
+    playNextFromQueue(); // Skip bad chunk
+  }
+}
+
+// ── Audio chunk handler ──────────────────────────────────────
+
+function handleAudioChunk(arrayBuffer) {
+  if (state.mode === 'realtime') {
+    // Queue chunks for sequential playback
+    state.audioQueue.push(arrayBuffer);
+    if (!state.isPlayingQueued) {
+      playNextFromQueue();
+    }
+  } else {
+    // Turn-based: stop current and play immediately (existing behavior)
+    handleAudioResponse(arrayBuffer);
+  }
+}
+
+async function handleAudioResponse(arrayBuffer) {
+  try {
+    if (!state.audioContext) state.audioContext = new AudioContext();
+    if (state.audioContext.state === 'suspended') await state.audioContext.resume();
+
+    if (state.currentAudioSource) {
+      try {
+        state.currentAudioSource.onended = null;
+        state.currentAudioSource.stop();
+      } catch { /* already stopped */ }
+      state.currentAudioSource = null;
+    }
+
+    const audioBuffer = await state.audioContext.decodeAudioData(arrayBuffer.slice(0));
+    const source = state.audioContext.createBufferSource();
+    source.buffer = audioBuffer;
+
+    if (!state.analyser) {
+      state.analyser = state.audioContext.createAnalyser();
+      state.analyser.fftSize = 256;
+    }
+    source.connect(state.analyser);
+    source.connect(state.audioContext.destination);
+
+    state.currentAudioSource = source;
+
+    source.onended = () => {
+      if (state.currentAudioSource === source) state.currentAudioSource = null;
+      if (state.isSpeaking) {
+        state.isSpeaking = false;
+        setOrbState('idle');
+        if (!state.isListening) stopVisualizer();
+      }
+    };
+
+    source.start();
+    state.isSpeaking = true;
+    setOrbState('speaking');
+    startVisualizer();
+    console.log(`🔊 Playing ${audioBuffer.duration.toFixed(1)}s of audio`);
+  } catch (err) {
+    console.error('Audio playback error:', err);
+    state.isSpeaking = false;
+    setOrbState('idle');
+  }
+}
+
+// ── Microphone (shared by both modes) ───────────────────────
 
 async function getOrCreateMicStream() {
   if (state.micStream) return state.micStream;
 
-  console.log('🎤 Requesting microphone access...');
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: {
       channelCount: 1,
@@ -234,30 +493,33 @@ async function getOrCreateMicStream() {
 
   state.micStream = stream;
 
-  // Set up analyser for visualizer (shared by both Mic and TTS)
   if (!state.audioContext) {
     state.audioContext = new AudioContext({ sampleRate: 16000 });
   }
   if (state.audioContext.state === 'suspended') {
     await state.audioContext.resume();
   }
-
   if (!state.analyser) {
     state.analyser = state.audioContext.createAnalyser();
     state.analyser.fftSize = 256;
   }
 
-  const source = state.audioContext.createMediaStreamSource(stream);
-  source.connect(state.analyser);
+  // Connect mic to analyser for visualizer (turn-based mode)
+  if (state.mode === 'turn-based') {
+    const source = state.audioContext.createMediaStreamSource(stream);
+    source.connect(state.analyser);
+  }
 
   return stream;
 }
 
+// ── Turn-based Recording (push-to-talk) ─────────────────────
+
 async function startRecording() {
+  if (state.mode === 'realtime') return; // Push-to-talk disabled in realtime mode
   if (state.isListening || state.isProcessing) return;
 
   if (state.isSpeaking) {
-    console.log('🛑 Interrupting AI response...');
     if (state.currentAudioSource) {
       state.currentAudioSource.stop();
       state.currentAudioSource = null;
@@ -266,12 +528,8 @@ async function startRecording() {
     setOrbState('idle');
   }
 
-  if (!state.isConnected) {
-    console.warn('Cannot record: not connected to voice server');
-    return;
-  }
+  if (!state.isConnected) return;
 
-  // Mark listening early to prevent rapid multiple starts
   state.isListening = true;
   setOrbState('listening');
   talkBtn.classList.add('active');
@@ -279,169 +537,71 @@ async function startRecording() {
 
   try {
     const stream = await getOrCreateMicStream();
-    
-    // Check if user already stopped listening while we were getting permissions
-    if (!state.isListening) {
-      console.warn('🎤 User stopped right away; cancelling recording start.');
-      return;
-    }
+    if (!state.isListening) return;
 
     state.audioChunks = [];
 
-    // Determine the best supported MIME type
     const preferredTypes = [
-      'audio/webm;codecs=opus',
-      'audio/webm',
-      'audio/ogg;codecs=opus',
-      'audio/mp4',
+      'audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', 'audio/mp4',
     ];
     let mimeType = '';
     for (const type of preferredTypes) {
-      if (MediaRecorder.isTypeSupported(type)) {
-        mimeType = type;
-        break;
-      }
+      if (MediaRecorder.isTypeSupported(type)) { mimeType = type; break; }
     }
 
-    // Start recording
-    const options = mimeType ? { mimeType } : {};
-    state.mediaRecorder = new MediaRecorder(stream, options);
-
-    state.mediaRecorder.ondataavailable = (event) => {
-      if (event.data.size > 0) {
-        state.audioChunks.push(event.data);
-      }
-    };
-
-    state.mediaRecorder.onstop = () => {
-      console.log(`🎤 Recording stopped, ${state.audioChunks.length} chunks collected`);
-      sendAudio();
-    };
-
-    state.mediaRecorder.start(); // Record as a single chunk
-    
-    // Start visualizer
+    state.mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+    state.mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) state.audioChunks.push(e.data); };
+    state.mediaRecorder.onstop = () => sendAudioBlob();
+    state.mediaRecorder.start();
     startVisualizer();
-    console.log('🎤 Recording started');
-
   } catch (err) {
     state.isListening = false;
     setOrbState('idle');
     talkBtn.classList.remove('active');
-    console.error('Microphone error:', err);
-    showAIResponse(`⚠️ Microphone access denied: ${err.message}`);
+    showAIResponse(`⚠️ Microphone error: ${err.message}`);
   }
 }
 
 function stopRecording() {
-  if (!state.isListening) return;
-
-  console.log('🎤 Stopping recording...');
+  if (!state.isListening || state.mode === 'realtime') return;
   state.isListening = false;
   talkBtn.classList.remove('active');
-
-  if (state.mediaRecorder && state.mediaRecorder.state === 'recording') {
-    state.mediaRecorder.requestData(); // Flush any remaining data
+  if (state.mediaRecorder?.state === 'recording') {
+    state.mediaRecorder.requestData();
     state.mediaRecorder.stop();
   }
-
   stopVisualizer();
 }
 
-async function sendAudio() {
-  if (state.audioChunks.length === 0) {
-    console.warn('No audio chunks to send');
-    setOrbState('idle');
-    return;
-  }
+async function sendAudioBlob() {
+  if (state.audioChunks.length === 0) { setOrbState('idle'); return; }
 
-  const mimeType = state.mediaRecorder?.mimeType || 'audio/webm';
-  const blob = new Blob(state.audioChunks, { type: mimeType });
+  const blob = new Blob(state.audioChunks, { type: state.mediaRecorder?.mimeType || 'audio/webm' });
   state.audioChunks = [];
 
-  console.log(`📤 Audio blob: ${blob.size} bytes, type: ${blob.type}`);
-
-  if (blob.size < 1000) {
-    console.warn('Audio too short (< 1KB), ignoring');
-    setOrbState('idle');
-    return;
-  }
+  if (blob.size < 1000) { setOrbState('idle'); return; }
 
   setOrbState('processing');
-
   const buffer = await blob.arrayBuffer();
-  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+  if (state.ws?.readyState === WebSocket.OPEN) {
     state.ws.send(buffer);
-    console.log(`📤 Sent ${buffer.byteLength} bytes to voice server`);
   } else {
     showAIResponse('⚠️ Not connected to voice server');
     setOrbState('idle');
   }
 }
 
-// ── Audio Playback ───────────────────────────────────────────
+// ── Barge-in (realtime mode) ─────────────────────────────────
 
-async function handleAudioResponse(arrayBuffer) {
-  try {
-    if (!state.audioContext) {
-      state.audioContext = new AudioContext();
-    }
-    if (state.audioContext.state === 'suspended') {
-      await state.audioContext.resume();
-    }
+function triggerBargeIn() {
+  if (state.mode !== 'realtime' || !state.isConnected) return;
+  if (!state.isSpeaking && !state.isProcessing) return;
 
-    // Stop any currently playing audio (filler or previous response)
-    if (state.currentAudioSource) {
-      try {
-        state.currentAudioSource.onended = null; // Prevent state reset from old source
-        state.currentAudioSource.stop();
-      } catch { /* already stopped */ }
-      state.currentAudioSource = null;
-    }
+  console.log('🛑 Barge-in triggered');
+  clearAudioQueue();
 
-    console.log(`🔊 Decoding ${arrayBuffer.byteLength} bytes of audio...`);
-    const audioBuffer = await state.audioContext.decodeAudioData(arrayBuffer.slice(0));
-    const source = state.audioContext.createBufferSource();
-    source.buffer = audioBuffer;
-    
-    // Create shared analyser if it doesn't exist yet (if user never used mic)
-    if (!state.analyser) {
-      state.analyser = state.audioContext.createAnalyser();
-      state.analyser.fftSize = 256;
-    }
-    
-    // Connect to both the visualizer AND the speakers
-    source.connect(state.analyser);
-    source.connect(state.audioContext.destination);
-
-    state.currentAudioSource = source;
-
-    source.onended = () => {
-      console.log('🔊 Audio playback finished');
-      if (state.currentAudioSource === source) {
-        state.currentAudioSource = null;
-      }
-      // Only reset state if we haven't already transitioned to listening
-      if (state.isSpeaking) {
-        state.isSpeaking = false;
-        setOrbState('idle');
-        if (!state.isListening) {
-          stopVisualizer();
-        }
-      }
-    };
-
-    source.start();
-    state.isSpeaking = true;
-    setOrbState('speaking');
-    startVisualizer();
-    console.log(`🔊 Playing ${audioBuffer.duration.toFixed(1)}s of audio`);
-  } catch (err) {
-    console.error('Audio playback error:', err);
-    showAIResponse('⚠️ Could not play audio response (check console for details)');
-    state.isSpeaking = false;
-    setOrbState('idle');
-    if (!state.isListening) stopVisualizer();
+  if (state.ws?.readyState === WebSocket.OPEN) {
+    state.ws.send(JSON.stringify({ type: 'interrupt' }));
   }
 }
 
@@ -452,30 +612,25 @@ function startVisualizer() {
 
   function draw() {
     state.animationFrame = requestAnimationFrame(draw);
-
     const width = canvas.width;
     const height = canvas.height;
     const centerX = width / 2;
     const centerY = height / 2;
 
     ctx.clearRect(0, 0, width, height);
-
     if (!state.analyser) return;
 
     const bufferLength = state.analyser.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
     state.analyser.getByteFrequencyData(dataArray);
 
-    // Calculate average volume
     const avg = dataArray.reduce((a, b) => a + b, 0) / bufferLength;
     const normalizedAvg = avg / 255;
 
-    // Draw reactive rings
     const numRings = 5;
     for (let i = 0; i < numRings; i++) {
       const radius = 60 + i * 20 + normalizedAvg * 30;
       const alpha = 0.3 - i * 0.05;
-
       ctx.beginPath();
       ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
       ctx.strokeStyle = `rgba(6, 182, 212, ${Math.max(0, alpha * (0.5 + normalizedAvg))})`;
@@ -483,7 +638,6 @@ function startVisualizer() {
       ctx.stroke();
     }
 
-    // Draw frequency bars in a circle
     const barCount = 64;
     for (let i = 0; i < barCount; i++) {
       const dataIndex = Math.floor((i / barCount) * bufferLength);
@@ -491,12 +645,10 @@ function startVisualizer() {
       const angle = (i / barCount) * Math.PI * 2 - Math.PI / 2;
       const innerRadius = 55;
       const barLength = value * 40;
-
       const x1 = centerX + Math.cos(angle) * innerRadius;
       const y1 = centerY + Math.sin(angle) * innerRadius;
       const x2 = centerX + Math.cos(angle) * (innerRadius + barLength);
       const y2 = centerY + Math.sin(angle) * (innerRadius + barLength);
-
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -535,22 +687,21 @@ function startWakeWordDetection() {
     for (let i = event.resultIndex; i < event.results.length; i++) {
       const transcript = event.results[i][0].transcript.toLowerCase().trim();
       if (transcript.includes(state.wakePhrase)) {
-        console.log(`🎤 Wake word detected: "${transcript}"`);
-        // Briefly stop wake word detection and start recording
         stopWakeWordDetection();
-        startRecording();
-
-        // Auto-stop recording after 8 seconds
-        setTimeout(() => {
-          if (state.isListening) {
-            stopRecording();
-            // Restart wake word detection after processing
-            setTimeout(() => {
-              if (state.wakeWordEnabled) startWakeWordDetection();
-            }, 2000);
-          }
-        }, 8000);
-
+        if (state.mode === 'turn-based') {
+          startRecording();
+          setTimeout(() => {
+            if (state.isListening) {
+              stopRecording();
+              setTimeout(() => { if (state.wakeWordEnabled) startWakeWordDetection(); }, 2000);
+            }
+          }, 8000);
+        } else {
+          // In realtime mode, wake word triggers barge-in
+          stateLabel.textContent = 'HEY LEO';
+          triggerBargeIn();
+          setTimeout(() => { if (state.wakeWordEnabled) startWakeWordDetection(); }, 1000);
+        }
         break;
       }
     }
@@ -563,7 +714,6 @@ function startWakeWordDetection() {
   };
 
   state.speechRecognition.onend = () => {
-    // Restart if still enabled
     if (state.wakeWordEnabled && !state.isListening) {
       setTimeout(() => {
         if (state.wakeWordEnabled) {
@@ -575,7 +725,6 @@ function startWakeWordDetection() {
 
   try {
     state.speechRecognition.start();
-    console.log(`🎤 Wake word detection active: "${state.wakePhrase}"`);
   } catch { /* already started */ }
 }
 
@@ -587,37 +736,22 @@ function stopWakeWordDetection() {
 
 // ── Event Handlers ───────────────────────────────────────────
 
-// Push-to-talk button
-talkBtn.addEventListener('mousedown', (e) => {
-  e.preventDefault();
-  startRecording();
-});
+// Push-to-talk (only active in turn-based mode)
+talkBtn.addEventListener('mousedown', (e) => { e.preventDefault(); startRecording(); });
+talkBtn.addEventListener('mouseup', (e) => { e.preventDefault(); stopRecording(); });
+talkBtn.addEventListener('mouseleave', () => { if (state.isListening) stopRecording(); });
+talkBtn.addEventListener('touchstart', (e) => { e.preventDefault(); startRecording(); });
+talkBtn.addEventListener('touchend', (e) => { e.preventDefault(); stopRecording(); });
 
-talkBtn.addEventListener('mouseup', (e) => {
-  e.preventDefault();
-  stopRecording();
-});
-
-talkBtn.addEventListener('mouseleave', () => {
-  if (state.isListening) stopRecording();
-});
-
-// Touch support
-talkBtn.addEventListener('touchstart', (e) => {
-  e.preventDefault();
-  startRecording();
-});
-
-talkBtn.addEventListener('touchend', (e) => {
-  e.preventDefault();
-  stopRecording();
-});
-
-// Keyboard: Space to talk
+// Space: push-to-talk (turn-based) or barge-in (realtime)
 document.addEventListener('keydown', (e) => {
   if (e.code === 'Space' && !e.repeat && !isInputFocused()) {
     e.preventDefault();
-    startRecording();
+    if (state.mode === 'realtime') {
+      triggerBargeIn();
+    } else {
+      startRecording();
+    }
   }
 });
 
@@ -637,12 +771,8 @@ function isInputFocused() {
 wakeWordToggle.addEventListener('click', () => {
   state.wakeWordEnabled = !state.wakeWordEnabled;
   wakeWordToggle.classList.toggle('active', state.wakeWordEnabled);
-
-  if (state.wakeWordEnabled) {
-    startWakeWordDetection();
-  } else {
-    stopWakeWordDetection();
-  }
+  if (state.wakeWordEnabled) startWakeWordDetection();
+  else stopWakeWordDetection();
 });
 
 // Settings
@@ -652,9 +782,7 @@ settingsBtn.addEventListener('click', () => {
   settingsPanel.classList.remove('hidden');
 });
 
-settingsClose.addEventListener('click', () => {
-  settingsPanel.classList.add('hidden');
-});
+settingsClose.addEventListener('click', () => settingsPanel.classList.add('hidden'));
 
 settingsSave.addEventListener('click', () => {
   state.wsUrl = wsUrlInput.value.trim();
@@ -662,14 +790,14 @@ settingsSave.addEventListener('click', () => {
   localStorage.setItem('wsUrl', state.wsUrl);
   localStorage.setItem('wakePhrase', state.wakePhrase);
   settingsPanel.classList.add('hidden');
+  stopRealtimeStreaming();
   state.reconnectAttempts = 0;
-  connect(); // Reconnect with new URL
+  connect();
 });
 
-// ── Keepalive ────────────────────────────────────────────────
-
+// Keepalive
 setInterval(() => {
-  if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+  if (state.ws?.readyState === WebSocket.OPEN) {
     state.ws.send(JSON.stringify({ type: 'ping' }));
   }
 }, 30000);
@@ -677,6 +805,6 @@ setInterval(() => {
 // ── Init ─────────────────────────────────────────────────────
 
 console.log('🚀 Gravity Claw Voice Agent initializing...');
-console.log('   Hold Space or click the mic button to talk');
-console.log('   Enable "Hey Leo" wake word for hands-free mode');
+console.log('   Realtime mode: just speak — VAD detects your voice automatically');
+console.log('   Turn-based mode: hold Space or the mic button to talk');
 connect();

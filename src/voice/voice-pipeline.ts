@@ -6,6 +6,7 @@ import { generateToolFiller, generateThinkingOutLoud } from "./groq-filler.js";
 import { runAgentLoop } from "../agent.js";
 import { stripTelegramHtml } from "../telegram-html.js";
 import type { AgentProgressReporter } from "../agent.js";
+import { describeToolAction } from "../tools/describe.js";
 
 /**
  * The core voice pipeline:
@@ -170,7 +171,7 @@ export async function runVoicePipeline(
       const toolCallMatch = msg.match(/^Tool call: ([a-zA-Z0-9_]+)\((.*)?\)$/);
       if (toolCallMatch) {
         const [, toolName, toolArgs] = toolCallMatch;
-        if (onProgress) onProgress(`⚙️ Using ${toolName}...`);
+        if (onProgress) onProgress(describeToolAction(toolName, toolArgs || ""));
         triggerContextAwareFiller(toolName, toolArgs || "");
         return;
       }
@@ -178,7 +179,8 @@ export async function runVoicePipeline(
       // Detect tool result events — just update UI text, no separate spoken filler
       const toolResultMatch = msg.match(/^Tool result: ([a-zA-Z0-9_]+): (.*)$/);
       if (toolResultMatch) {
-        if (onProgress) onProgress(`✅ Got result`);
+        const [, resultToolName] = toolResultMatch;
+        if (onProgress) onProgress(describeToolAction(resultToolName, ""));
         return;
       }
 
@@ -227,7 +229,7 @@ export async function runVoicePipeline(
   const responseText = await runAgentLoop(
     effectiveChatId,
     transcript,
-    "terminal",
+    "gui",
     voiceProgress,
   );
 

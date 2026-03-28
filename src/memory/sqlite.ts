@@ -1,5 +1,5 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, unlinkSync } from "node:fs";
 import { dirname } from "node:path";
 import { config } from "../config.js";
 
@@ -20,10 +20,21 @@ export function initDatabase(): void {
   // Ensure data directory exists
   mkdirSync(dirname(config.memoryDbPath), { recursive: true });
 
-  db = new Database(config.memoryDbPath);
-
-  // Enable WAL mode for better concurrency
-  db.pragma("journal_mode = WAL");
+  try {
+    db = new Database(config.memoryDbPath);
+    db.pragma("journal_mode = WAL");
+  } catch (err: any) {
+    if (err?.code === "SQLITE_CORRUPT") {
+      console.warn("⚠️  Database corrupt — recreating fresh DB");
+      try { unlinkSync(config.memoryDbPath); } catch {}
+      try { unlinkSync(config.memoryDbPath + "-wal"); } catch {}
+      try { unlinkSync(config.memoryDbPath + "-shm"); } catch {}
+      db = new Database(config.memoryDbPath);
+      db.pragma("journal_mode = WAL");
+    } else {
+      throw err;
+    }
+  }
 
   // ── Facts / Preferences table
   db.exec(`

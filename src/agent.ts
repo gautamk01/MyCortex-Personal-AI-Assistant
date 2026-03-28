@@ -2,6 +2,7 @@ import { config } from "./config.js";
 import { getSystemPrompt } from "./prompt.js";
 import {
   chat,
+  chatStream,
   type ChatCompletionMessageParam,
   type ChatCompletionToolCall,
 } from "./llm.js";
@@ -22,6 +23,12 @@ export type AgentProgressPhase =
 export interface AgentProgressReporter {
   update: (phase: AgentProgressPhase | string) => void | Promise<void>;
 }
+
+export type AgentStreamEvent =
+  | { type: "token"; text: string }
+  | { type: "tool_start"; name: string; args: string }
+  | { type: "tool_done"; name: string; result: string }
+  | { type: "done" };
 
 // ── Per-chat conversation history ──────────────────────────────
 
@@ -142,6 +149,122 @@ export async function runAgentLoop(
   // Safety limit reached
   console.warn(`⚠️  Agent loop hit max iterations (${config.maxAgentIterations}) for chat ${chatId}`);
   return "I've been thinking about this for too long — let me stop here. Could you rephrase or simplify your request?";
+}
+
+// ── Streaming Agent Loop ────────────────────────────────────────
+
+/**
+ * Run the agentic loop in streaming mode, yielding tokens as they arrive.
+ * Tool calls pause the token stream, execute, then resume streaming from the LLM.
+ */
+export async function* runAgentLoopStreaming(
+  chatId: number,
+  userMessage: string,
+  interfaceMode: "gui" | "terminal" = "terminal",
+  progress?: AgentProgressReporter,
+  signal?: AbortSignal,
+): AsyncGenerator<AgentStreamEvent> {
+  const history = getHistory(chatId);
+  const tools = getToolDefinitions();
+
+  markRecentHeartbeatResponded(chatId);
+  markUserActive(chatId);
+
+  const autoLogNote = await attemptAutoLog(chatId, userMessage).catch(() => null);
+  const preparedUserMessage = autoLogNote
+    ? `${userMessage}\n\n[System note: ${autoLogNote} Acknowledge it briefly and do not log the same activity again unless the user asks.]`
+    : userMessage;
+
+  history.push({ role: "user", content: preparedUserMessage });
+  pruneContext(history);
+
+  let iterations = 0;
+  let fullResponse = "";
+
+  while (iterations < config.maxAgentIterations) {
+    if (signal?.aborted) return;
+    iterations++;
+
+    await progress?.update("checking_memory");
+    const memoryContext = await getFullMemoryContext(chatId, userMessage);
+    const systemPrompt = getSystemPrompt(interfaceMode) + memoryContext;
+
+    await progress?.update("thinking");
+
+    let textBuffer = "";
+    let pendingToolCalls: ChatCompletionToolCall[] = [];
+
+    for await (const event of chatStream(systemPrompt, history, tools, undefined, signal)) {
+      if (signal?.aborted) return;
+
+      if (event.type === "text_delta") {
+        textBuffer += event.delta;
+        fullResponse += event.delta;
+        yield { type: "token", text: event.delta };
+      } else if (event.type === "tool_calls") {
+        pendingToolCalls = event.calls;
+      } else if (event.type === "finish") {
+        break;
+      }
+    }
+
+    if (pendingToolCalls.length === 0) {
+      history.push({ role: "assistant", content: textBuffer || null } as ChatCompletionMessageParam);
+      if (fullResponse) {
+        storeEpisode(chatId, userMessage, fullResponse).catch(() => {});
+        autoExtract(chatId, userMessage, fullResponse).catch(() => {});
+      }
+      yield { type: "done" };
+      return;
+    }
+
+    // Append assistant message with tool calls
+    history.push({
+      role: "assistant",
+      content: textBuffer || null,
+      tool_calls: pendingToolCalls,
+    } as ChatCompletionMessageParam);
+
+    await progress?.update("using_tools");
+
+    for (const toolCall of pendingToolCalls) {
+      if (signal?.aborted) return;
+
+      const funcName = toolCall.function.name;
+      let funcArgs: Record<string, unknown> = {};
+      try {
+        funcArgs = JSON.parse(toolCall.function.arguments || "{}");
+      } catch {
+        console.warn(`⚠️  Failed to parse tool args for ${funcName}`);
+      }
+
+      yield { type: "tool_start", name: funcName, args: JSON.stringify(funcArgs) };
+      await progress?.update(`Tool call: ${funcName}(${JSON.stringify(funcArgs)})`);
+
+      let result: string;
+      try {
+        console.log(`🔧 Tool call: ${funcName}(${JSON.stringify(funcArgs)})`);
+        result = await executeTool(funcName, { ...funcArgs, __chatId: chatId });
+        console.log(`✅ Tool result: ${result.slice(0, 200)}`);
+        await progress?.update(`Tool result: ${funcName}: ${result.slice(0, 100)}`);
+      } catch (error) {
+        result = `Error: ${error instanceof Error ? error.message : String(error)}`;
+        console.error(`❌ Tool error (${funcName}): ${result}`);
+      }
+
+      history.push({
+        role: "tool",
+        tool_call_id: toolCall.id,
+        content: result,
+      } as ChatCompletionMessageParam);
+
+      yield { type: "tool_done", name: funcName, result: result.slice(0, 100) };
+    }
+  }
+
+  console.warn(`⚠️  Streaming agent loop hit max iterations (${config.maxAgentIterations}) for chat ${chatId}`);
+  yield { type: "token", text: "I've been thinking about this for too long — could you rephrase or simplify?" };
+  yield { type: "done" };
 }
 
 // ── Helpers ─────────────────────────────────────────────────────

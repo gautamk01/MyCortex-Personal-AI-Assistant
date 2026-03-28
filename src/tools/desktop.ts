@@ -327,7 +327,8 @@ registerTool({
 });
 
 // ── open_url ───────────────────────────────────────────────────
-
+// Disabled — BrowserOS handles all browser tasks via browseros.ts
+/*
 registerTool({
   name: "open_url",
   description: "Open a URL in the default web browser.",
@@ -348,3 +349,4 @@ registerTool({
     }
   },
 });
+*/

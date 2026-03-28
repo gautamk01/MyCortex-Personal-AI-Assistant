@@ -11,15 +11,18 @@ API:
     GET  /health  → { "status": "ok" }
 """
 
+import asyncio
 import io
 import os
 import logging
+import struct
 from contextlib import asynccontextmanager
 
+import numpy as np
 import soundfile as sf
 import torch
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -97,6 +100,54 @@ async def text_to_speech(req: TTSRequest):
     except Exception as e:
         logger.error(f"TTS error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/tts/stream")
+async def text_to_speech_stream(req: TTSRequest):
+    """
+    Streaming TTS endpoint — yields length-prefixed mini-WAV chunks as Kokoro generates them.
+    Each chunk: [4 bytes big-endian uint32 = wav_length][wav_bytes]
+    This allows the client to start playing audio before the full response is generated.
+    """
+    if not pipeline:
+        raise HTTPException(status_code=503, detail="Pipeline not loaded yet")
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text cannot be empty")
+
+    logger.info(f"TTS stream request: {len(req.text)} chars, voice={req.voice}")
+
+    queue: asyncio.Queue = asyncio.Queue()
+    loop = asyncio.get_event_loop()
+
+    def _run_pipeline():
+        """Run Kokoro pipeline in a thread, putting WAV chunks into the asyncio queue."""
+        try:
+            for _, _, audio in pipeline(req.text, voice=req.voice, speed=req.speed):
+                audio_int16 = (audio * 32767).clip(-32768, 32767).astype(np.int16)
+                buf = io.BytesIO()
+                sf.write(buf, audio_int16, 24000, format="WAV", subtype="PCM_16")
+                wav_bytes = buf.getvalue()
+                asyncio.run_coroutine_threadsafe(queue.put(wav_bytes), loop).result(timeout=10)
+        except Exception as e:
+            logger.error(f"TTS stream pipeline error: {e}")
+        finally:
+            asyncio.run_coroutine_threadsafe(queue.put(None), loop).result(timeout=5)
+
+    asyncio.ensure_future(loop.run_in_executor(None, _run_pipeline))
+
+    async def generate():
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                break
+            # Length-prefix each WAV chunk so the Node.js client can parse frame boundaries
+            yield struct.pack(">I", len(chunk)) + chunk
+
+    return StreamingResponse(
+        generate(),
+        media_type="application/octet-stream",
+        headers={"X-Sample-Rate": "24000", "X-Format": "pcm16-wav"},
+    )
 
 # ── Run ─────────────────────────────────────────────────────────
 

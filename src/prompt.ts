@@ -46,13 +46,33 @@ ${soulPrompt}
 - **delete_file**: Delete a file.
 - **file_info**: Get file metadata.
 
-### Web & Browser
-- **web_search**: Search the web for information.
-- **browser_navigate**: Open a URL in a headless browser.
-- **browser_click**: Click elements on a page.
-- **browser_type**: Type into input fields.
-- **browser_screenshot**: Take a page screenshot.
-- **browser_extract_content**: Extract text, links, or HTML from a page.
+### Web & Browser (High-Level — preferred)
+- **web_search**: Search the web for information (text-only, no GUI). Use for quick factual lookups when the user does NOT need to see a browser.
+- **browse**: Perform any browser action in natural language. BrowserOS opens automatically on screen. Optionally navigate to a URL first. Supports verification and {{template}} context interpolation.
+  Examples: "search for X", "click the login button", "fill the form and submit"
+- **browse_extract**: Extract structured data from the current page using NL + JSON schema.
+- **browse_verify**: Assert the current page matches an expected state.
+- **browse_screenshot**: Capture a screenshot of the browser page. Returns image data. Use when user wants to SEE a page.
+- **browse_read_page**: Get page content as clean readable markdown. Use for reading articles, docs, search results without needing a schema.
+- **browse_save_pdf**: Export the current page as a PDF file. Use for saving receipts, articles, research papers.
+- **browse_run_js**: Execute JavaScript on the page. Use for counting elements, extracting specific data, or page manipulation.
+- **browse_tabs**: Manage browser tabs — list open tabs, open new ones, or close them. Use for multi-tab workflows.
+
+### Web & Browser (Low-Level — fallback for fine-grained control)
+- **browseros_list_tools**: Discover raw BrowserOS MCP tools.
+- **browseros_run**: Execute a specific BrowserOS tool by name.
+
+**Browser Task Decision:**
+1. For most tasks → use **browse** with a natural language instruction (handles nav + interaction).
+2. For reading page content → use **browse_read_page** (returns markdown, no schema needed).
+3. For structured data extraction → use **browse_extract** with a JSON schema.
+4. For visual capture → use **browse_screenshot**.
+5. For saving pages → use **browse_save_pdf**.
+6. For state assertions → use **browse_verify**.
+7. For custom page queries → use **browse_run_js**.
+8. For multi-tab work → use **browse_tabs**.
+9. Only use **browseros_run** for element-level precision (specific element IDs, raw MCP tools).
+10. NEVER fall back to open_app, open_file, or web_search when the user wants VISIBLE browser interaction.
 
 ### Scheduling & Automation
 - **schedule_task**: Create recurring scheduled tasks (cron syntax).
@@ -92,7 +112,6 @@ ${soulPrompt}
 - **open_folder**: Open a folder in the file manager (Nautilus).
 - **open_file**: Open a file with the default application (PDF viewer, image viewer, editor, etc.).
 - **open_app**: Launch any GUI application by name (e.g. 'firefox', 'code', 'calculator').
-- **open_url**: Open a URL in the default web browser.
 
 ### Codex CLI (Local AI)
 - **codex_ask**: Send a prompt or coding task to the locally installed OpenAI Codex CLI and return its response. Use when the user says "ask codex", "use codex", or needs deep coding help.
@@ -187,11 +206,12 @@ export function getSystemPrompt(interfaceMode: "gui" | "terminal" = "terminal"):
   if (interfaceMode === "gui") {
     modeInstructions = "\n\n## Current Mode: GUI\n" +
       "The user has activated GUI mode. You MUST prioritize using visible Desktop / GUI Actions (open_terminal_gui, type_in_terminal, open_folder, open_app). " +
-      "The browser tool is currently running in visible (headed) mode, so the user can see what it does on screen.";
+      "For web/browser tasks, prefer browse/browse_extract/browse_verify for natural language tasks. " +
+      "Use browseros_run for fine-grained element control. BrowserOS launches live on screen so the user watches everything in real-time.";
   } else {
     modeInstructions = "\n\n## Current Mode: Terminal\n" +
       "The user is in Terminal mode. You MUST prioritize background shell tools (run_shell_command, open_terminal) and headless operations. " +
-      "The browser tool is running invisibly in the background.";
+      "For web/browser tasks, prefer browse/browse_extract/browse_verify — BrowserOS will still open visibly.";
   }
 
   let environmentInstructions = "";
