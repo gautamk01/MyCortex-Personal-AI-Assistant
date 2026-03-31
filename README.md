@@ -17,15 +17,23 @@ MyCortex is a self-hosted, agentic AI assistant that runs on your local machine 
 ### 🧠 Persistent Memory System
 
 - **SQLite Memory** — store facts, preferences, and context that persists across sessions
+- **Automated Backups** — built-in database corruption backups and safety checks
 - **Knowledge Graph** — interconnected entities and relationships with graph traversal queries
 - **Markdown Notes** — human-readable `.md` files with YAML frontmatter, git-friendly
 - **Multimodal Memory** — metadata extraction and search for images, audio, video, and documents
 - **Self-Evolving Memory** — access tracking, importance decay, duplicate merging, and maintenance
 - **Context Pruning** — auto-summarizes older messages when approaching token limits (`/compact`)
 
+### 🎛️ Mission Control Dashboard
+
+- Visual drag-and-drop workflow builder using React and `@xyflow/react`
+- Backend execution engine for composing and executing automated agent tasks
+- Real-time environment monitoring and modular UI components
+
 ### 🌐 Web & Browser Automation
 
 - Headless (or headed) browser via Playwright
+- Deep integration with BrowserOS for fully autonomous web task execution
 - Navigate, click, type, screenshot, and extract content from web pages
 - Web search tool for real-time information retrieval
 
@@ -48,6 +56,11 @@ MyCortex is a self-hosted, agentic AI assistant that runs on your local machine 
 - Pause, resume, and delete scheduled tasks
 - Tasks fire into the agent loop automatically
 
+### 📈 Personal Tracking Tools
+
+- Dedicated tools for structured logging (e.g., LeetCode revision tracking)
+- Company and job application tracking integrated into the AI workflow
+
 ### 🪝 Webhooks
 
 - Create HTTP endpoints that route incoming payloads to the agent
@@ -56,7 +69,10 @@ MyCortex is a self-hosted, agentic AI assistant that runs on your local machine 
 
 ### 🔊 Voice I/O
 
-- Text-to-Speech via Kokoro TTS (local Python sidecar)
+- Hands-free voice detection with wake word support ("Hey Leo")
+- Real-time streaming TTS and dynamic Groq-generated thoughts for continuous agent progress reporting
+- Voice message broadcasting for scheduled system heartbeats and alerts
+- Local Text-to-Speech via Kokoro TTS (Python sidecar)
 - Switch between text and voice reply modes
 - Automatic markdown stripping for clean speech output
 
@@ -130,7 +146,11 @@ cortex/
 │   ├── webhooks/           # HTTP webhook endpoints
 │   ├── skills/             # Hot-loadable .md skill files
 │   └── mcp/               # MCP server bridge
+├── mission-control/        # Next.js visual dashboard and workflow builder
+├── BrowserOS/              # Agentic browser interaction environment
+├── voice-agent/            # Advanced voice detection and streaming service
 ├── tts-server/             # Kokoro TTS Python sidecar
+├── stt-server/             # Local Speech-to-Text server
 ├── skills/                 # Skill definition files
 ├── data/                   # SQLite DB + markdown notes (gitignored)
 ├── package.json
