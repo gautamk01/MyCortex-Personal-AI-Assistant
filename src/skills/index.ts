@@ -102,6 +102,14 @@ export async function loadSkills(): Promise<void> {
   }
 }
 
+// ── Dashboard API helper ──────────────────────────────────────────
+
+export function getLoadedSkills() {
+  return loadedSkills.map(({ name, description, triggers, filePath }) => ({
+    name, description, triggers, filePath,
+  }));
+}
+
 // ── Get Skills for System Prompt ───────────────────────────────
 
 export function getSkillsPromptSection(): string {

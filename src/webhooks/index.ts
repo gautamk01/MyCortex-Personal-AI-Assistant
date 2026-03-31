@@ -29,6 +29,14 @@ export function setWebhookCallback(cb: WebhookCallback): void {
   onWebhookReceived = cb;
 }
 
+// ── Dashboard API helper ──────────────────────────────────────────
+
+export function getWebhooksList() {
+  return Array.from(webhooks.values()).map(({ id, name, path, chatId, secret, createdAt }) => ({
+    id, name, url: path, hasSecret: !!secret, chatId, createdAt,
+  }));
+}
+
 // ── Express server ─────────────────────────────────────────────
 
 const app = express();
@@ -42,7 +50,7 @@ app.use("/api/sync", syncRouter);
 app.options("/api/dashboard/{*path}", (_req, res) => {
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, x-dashboard-secret");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.status(204).end();
 });
 app.use("/api/dashboard", dashboardRouter);

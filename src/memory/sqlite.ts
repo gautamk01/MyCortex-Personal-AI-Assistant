@@ -270,6 +270,36 @@ export function initDatabase(): void {
     )
   `);
 
+  // ── Workflows table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workflows (
+      id            TEXT PRIMARY KEY,
+      name          TEXT NOT NULL DEFAULT 'Untitled Workflow',
+      description   TEXT DEFAULT '',
+      nodes         TEXT NOT NULL DEFAULT '[]',
+      edges         TEXT NOT NULL DEFAULT '[]',
+      status        TEXT DEFAULT 'draft',
+      lastRunAt     TEXT,
+      lastRunStatus TEXT,
+      createdAt     TEXT DEFAULT (datetime('now')),
+      updatedAt     TEXT DEFAULT (datetime('now'))
+    )
+  `);
+
+  // ── Workflow runs table
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS workflow_runs (
+      id          TEXT PRIMARY KEY,
+      workflowId  TEXT NOT NULL,
+      status      TEXT NOT NULL DEFAULT 'running',
+      nodeResults TEXT DEFAULT '[]',
+      error       TEXT,
+      startedAt   TEXT DEFAULT (datetime('now')),
+      completedAt TEXT,
+      FOREIGN KEY (workflowId) REFERENCES workflows(id) ON DELETE CASCADE
+    )
+  `);
+
   // Check and add lastActiveAt column to coach_profiles if it's missing (migration)
   const coachCols = getDb().prepare(`PRAGMA table_info(coach_profiles)`).all() as { name: string }[];
   if (!coachCols.some((c) => c.name === "lastActiveAt")) {

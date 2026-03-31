@@ -30,6 +30,16 @@ export function setSchedulerCallback(cb: TaskCallback): void {
   onTaskFire = cb;
 }
 
+// ── Dashboard API helper ──────────────────────────────────────────
+
+export function getScheduledTasksList() {
+  return Array.from(tasks.values()).map(
+    ({ id, name, cronExpression, action, chatId, paused, createdAt }) => ({
+      id, name, cronExpression, action, chatId, paused, createdAt,
+    })
+  );
+}
+
 // ── Shutdown & Global Controls ───────────────────────────────────
 
 export function stopAllTasks(): void {

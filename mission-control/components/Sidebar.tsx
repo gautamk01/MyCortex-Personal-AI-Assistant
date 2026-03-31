@@ -10,6 +10,12 @@ import {
   Plug,
   Settings,
   BarChart3,
+  BookOpen,
+  Blocks,
+  Wrench,
+  Calendar,
+  FileText,
+  GitBranch,
 } from "lucide-react";
 import type { DashboardStats } from "@/lib/api";
 
@@ -17,14 +23,40 @@ interface SidebarProps {
   stats?: DashboardStats | null;
 }
 
-const navItems = [
-  { href: "/", label: "Command Center", icon: Rocket },
-  { href: "/brain", label: "Second Brain", icon: Brain },
-  { href: "/productivity", label: "Productivity", icon: Zap },
-  { href: "/tasks", label: "Tasks", icon: CheckSquare },
-  { href: "/connections", label: "Connections", icon: Plug },
-  { href: "/content", label: "Content Intel", icon: BarChart3 },
-  { href: "/settings", label: "Settings", icon: Settings },
+const navSections = [
+  {
+    label: "DASHBOARD",
+    items: [
+      { href: "/", label: "Command Center", icon: Rocket },
+    ],
+  },
+  {
+    label: "AGENT",
+    items: [
+      { href: "/brain", label: "Second Brain", icon: Brain },
+      { href: "/skills", label: "Skills", icon: BookOpen },
+      { href: "/mcp", label: "MCP Servers", icon: Blocks },
+      { href: "/tools", label: "Tools", icon: Wrench },
+      { href: "/workflows", label: "Workflows", icon: GitBranch },
+    ],
+  },
+  {
+    label: "PERSONAL",
+    items: [
+      { href: "/tasks", label: "Tasks", icon: CheckSquare },
+      { href: "/productivity", label: "Productivity", icon: Zap },
+    ],
+  },
+  {
+    label: "SYSTEM",
+    items: [
+      { href: "/connections", label: "Connections", icon: Plug },
+      { href: "/scheduler", label: "Scheduler", icon: Calendar },
+      { href: "/logs", label: "Logs & Analytics", icon: FileText },
+      { href: "/content", label: "Content Intel", icon: BarChart3 },
+      { href: "/settings", label: "Settings", icon: Settings },
+    ],
+  },
 ];
 
 function getLevelTitle(level: number): string {
@@ -53,7 +85,7 @@ export default function Sidebar({ stats }: SidebarProps) {
         <div className="sidebar-brand-icon">🧠</div>
         <div className="sidebar-brand-text">
           <h2>MyCortex</h2>
-          <span>Mission Control v0.1</span>
+          <span>Mission Control v0.2</span>
         </div>
       </div>
 
@@ -64,26 +96,34 @@ export default function Sidebar({ stats }: SidebarProps) {
           <div className="agent-status-text">
             <strong>Agent Online</strong>
             <br />
-            {stats ? `Uptime ${stats.uptime}` : "Connecting…"}
+            {stats ? `Uptime ${stats.uptime}` : "Connecting\u2026"}
           </div>
         </div>
       </div>
 
       {/* ── Navigation ──────────────────────────────────────── */}
       <nav className="sidebar-nav">
-        {navItems.map((item) => {
-          const isActive = pathname === item.href;
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={`nav-item${isActive ? " active" : ""}`}
-            >
-              <item.icon className="nav-icon" />
-              {item.label}
-            </Link>
-          );
-        })}
+        {navSections.map((section) => (
+          <div key={section.label} className="nav-section">
+            <div className="nav-section-label">{section.label}</div>
+            {section.items.map((item) => {
+              const isActive =
+                item.href === "/"
+                  ? pathname === "/"
+                  : pathname.startsWith(item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`nav-item${isActive ? " active" : ""}`}
+                >
+                  <item.icon className="nav-icon" />
+                  {item.label}
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       {/* ── XP Bar ──────────────────────────────────────────── */}

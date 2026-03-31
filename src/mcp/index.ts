@@ -122,6 +122,21 @@ async function connectServer(name: string, serverConfig: MCPServerConfig): Promi
   console.log(`🔌 MCP server "${name}" connected — ${toolNames.length} tools discovered`);
 }
 
+// ── Dashboard API helpers ─────────────────────────────────────────
+
+export function getConnectedServersList() {
+  return Array.from(connectedServers.values()).map(({ name, tools }) => ({
+    name,
+    tools,
+    toolCount: tools.length,
+    connected: true,
+  }));
+}
+
+export function getMcpConfigPath(): string {
+  return resolve(config.mcpConfigPath);
+}
+
 // ── Shutdown ───────────────────────────────────────────────────
 
 export async function closeMCPBridge(): Promise<void> {
